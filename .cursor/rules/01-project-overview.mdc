@@ -1,0 +1,19 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+# CS2 Highlight Generator
+
+This project analyzes CS2 gameplay videos to extract highlight clips and compile them into a single highlight video.
+
+## Main Components
+
+- **Entry Point:** [main.py](mdc:main.py) - Contains the CLI interface and main application logic
+- **Video Analysis:** [agent.py](mdc:agent.py) - Google Gemini Flash API integration for video analysis
+- **Database:** [db.py](mdc:db.py) - SQLite database for tracking processed clips
+- **Highlight Compilation:** [highlighter.py](mdc:highlighter.py) - Core logic for highlight detection and compilation planning
+- **Video Processing:** [video.py](mdc:video.py) - FFmpeg integration for video processing
+- **Data Models:** [models.py](mdc:models.py) - Pydantic models for application data
+- **Logging:** [logging_config.py](mdc:logging_config.py) - Logging configuration
+

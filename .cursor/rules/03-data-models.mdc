@@ -1,0 +1,26 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+# Data Models
+
+The application uses these key data models defined in [models.py](mdc:models.py):
+
+## Main Models
+
+- **HighlightSegment**: Represents a single highlight segment within a video
+- **ClipAnalysis**: Full analysis of a video clip with identified highlights
+- **SelectedHighlight**: A highlight segment selected for final compilation
+- **CompilationPlan**: Plan for the final video compilation with selected highlights
+
+## Database Representation
+
+The [ClipDatabase](mdc:db.py) stores clips in SQLite with these fields:
+- id (primary key)
+- name (clip filename)
+- path (absolute path to clip)
+- analysis (JSON representation of ClipAnalysis)
+- used_at (timestamp when used in compilation)
+- created_at (timestamp when added to database)
+

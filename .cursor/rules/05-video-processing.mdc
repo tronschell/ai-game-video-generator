@@ -1,0 +1,21 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+# Video Processing
+
+Video processing is handled by [video.py](mdc:video.py) which provides an interface to FFmpeg.
+
+## Key Functions
+
+- **get_video_duration**: Determines video length in seconds
+- **list_video_files**: Scans a directory for video files with specified extensions
+- **create_concat_file**: Creates an FFmpeg concat format file for editing
+- **compile_highlights**: Uses FFmpeg to concatenate highlight segments into a final video
+- **create_thumbnail**: Extracts a frame from the video to use as a thumbnail
+
+## FFmpeg Integration
+
+The application uses FFmpeg's concat demuxer to efficiently join video segments without re-encoding, preserving quality while minimizing processing time.
+

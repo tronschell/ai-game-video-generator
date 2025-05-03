@@ -1,0 +1,18 @@
+[project]
+name = "youtube-agent"
+version = "0.1.0"
+description = "CS2 gameplay highlight generator"
+readme = "README.md"
+requires-python = ">=3.8"
+dependencies = [
+    "google-genai",
+    "ffmpeg-python",
+    "click",
+    "loguru",
+    "pydantic",
+    "opencv-python",
+    "python-dotenv"
+]
+
+[project.scripts]
+highlight-generator = "main:main"

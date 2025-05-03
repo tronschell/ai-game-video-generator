@@ -1,0 +1,23 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+# Google ADK Integration
+
+This application uses Google's AI Development Kit (ADK) with Gemini Flash 2.5 to analyze CS2 gameplay videos.
+
+## Key Components
+
+- [agent_fn](mdc:agent.py) decorator in [agent.py](mdc:agent.py) defines the AI analysis function
+- Video content is processed to identify:
+  - Clutch moments (1v3, 1v4, 1v5)
+  - Impressive kills (headshots, multikills)
+  - Emotional reactions (indicated by loud microphone moments)
+
+## Implementation
+
+The `analyze_video` function in [agent.py](mdc:agent.py) processes video content and returns a structured analysis with highlight timestamps and descriptions.
+
+This is wrapped by `process_video_with_agent()` which handles file I/O and conversion between ADK types and application models.
+

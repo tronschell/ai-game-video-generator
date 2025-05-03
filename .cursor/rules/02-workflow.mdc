@@ -1,0 +1,17 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+# Workflow Process
+
+The CS2 Highlight Generator follows this workflow:
+
+1. **Scan for Videos**: [HighlightCompiler.scan_clips_folder()](mdc:highlighter.py) scans the specified folder for video files
+2. **Database Tracking**: [ClipDatabase](mdc:db.py) tracks all clips and their analysis state
+3. **Video Analysis**: [process_video_with_agent()](mdc:agent.py) analyzes videos using Google Gemini Flash API
+4. **Compilation Planning**: [HighlightCompiler.plan_compilation()](mdc:highlighter.py) selects highlights to meet target duration
+5. **Video Generation**: [compile_highlights()](mdc:video.py) uses FFmpeg to create the final video
+
+The main entry point is the [main.py](mdc:main.py) CLI tool which orchestrates this workflow.
+
