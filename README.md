@@ -1,67 +1,102 @@
-# CS2 Highlight Generator
+# CS2 Highlight Generator 🎮
 
-This application analyzes CS2 gameplay videos to extract highlight clips and compile them into a single highlight video.
+An intelligent highlight generator for Counter-Strike 2 gameplay videos that automatically identifies and compiles your best moments using Google's Gemini AI.
 
-## Features
+## 🌟 Features
 
-- Automatically scans a folder for gameplay clips
-- Uses Google Gemini Flash 2.5 to analyze videos for clutch moments, cool kills, and reactions
-- Compiles identified highlights into a single video
-- Tracks processed clips in a SQLite database to avoid duplication
+- **Smart Highlight Detection**: Uses Google Gemini Flash 2.5 to identify:
+  - Clutch moments (1vX situations)
+  - Impressive kills and multi-kills
+  - Emotional reactions and key moments
+- **Batch Processing**: Efficiently processes multiple video files concurrently
+- **Automatic Compilation**: Combines highlights into a single, well-edited video
+- **Smart Filtering**: Only includes highlights from your gameplay (username: "i have no enemies")
+- **Context-Aware**: Analyzes round context to ensure meaningful highlights
+- **Automatic Cleanup**: Manages temporary files and API resources
+- **Clip Tracking**: Maintains a history of used clips to prevent duplicates in future compilations
 
-## Installation
+## 🛠️ Prerequisites
 
-1. Clone this repository
-2. Install requirements:
+- Python 3.8 or higher
+- FFmpeg installed and available in your system PATH
+- Google API key for Gemini AI
+- Counter-Strike 2 gameplay recordings
+
+## 📦 Installation
+
+1. Clone the repository:
+   ```bash
+   git clone <repository-url>
+   cd cs2-highlight-generator
    ```
+
+2. Create and activate a virtual environment:
+   ```bash
+   python -m venv .venv
+   # Windows
+   .venv\Scripts\activate
+   # Linux/Mac
+   source .venv/bin/activate
+   ```
+
+3. Install the package in editable mode:
+   ```bash
    pip install -e .
    ```
-3. Make sure you have FFmpeg installed and available in your PATH
 
-## Usage
+4. Create a `.env` file in the project root:
+   ```
+   GOOGLE_API_KEY=your_gemini_api_key_here
+   ```
+
+## 🚀 Usage
+
+### Basic Usage
 
 ```bash
-# Default usage - processes clips from default folder
-highlight-generator
-
-# Specify a custom clips folder
-highlight-generator --clips-folder "path/to/clips"
-
-# Specify output video length (in minutes)
-highlight-generator --output-length 15
-
-# Custom output filename
-highlight-generator --output-filename "my-highlights.mp4"
-
-# Force include previously used clips
-highlight-generator --include-used-clips
-
-# Create a thumbnail from the compiled video
-highlight-generator --create-thumbnail
-
-# Limit analysis to a specific number of clips
-highlight-generator --max-clips 5
+python main.py /path/to/clips/folder
 ```
 
-## Requirements
+The script will:
+1. Process the 25 most recent video clips in the specified folder
+2. Analyze each clip for highlight-worthy moments
+3. Check for and skip any previously used clips
+4. Generate a compilation video with the best unused moments
 
-- Python 3.8+
-- FFMPEG
-- Google ADK
+### Output Files
 
-## How It Works
+- `highlights.json`: Contains metadata about detected highlights
+- `highlights_[timestamp].mp4`: The final compiled highlight video
+- `used_clips.json`: Tracks which clips have been used in previous compilations
+- Log files in the `logs/` directory
+- Temporary files in `temp_segments/` (automatically cleaned up)
+- Final videos in `exported_videos/` directory
 
-1. The application scans the specified folder for video files
-2. Each video is analyzed by a Google Gemini Flash 2.5 agent to identify highlights
-3. The agent identifies clutch moments, cool kills, and excited reactions
-4. Analysis results are stored in a SQLite database and as JSON files
-5. The application selects highlights to compile into a video of the desired length
-6. FFMPEG is used to concatenate the highlight segments into a single video
+## 🔧 Project Structure
 
-## Output
+- `main.py`: Entry point and orchestration
+- `video_analysis.py`: Video analysis using Gemini AI
+- `video_concatenator.py`: Video compilation utilities with clip tracking
+- `delete_files.py`: Cleanup utilities
+- `logging_config.py`: Logging configuration
 
-The application generates several files:
-- The compiled highlight video (default: output{MM-DD-YYYY}.mp4)
-- A JSON file for each analyzed clip ({clip_name}_analysis.json)
-- A compilation plan JSON file (compilation_plan_{timestamp}.json)
-- Log files in the logs/ directory
+## ⚙️ Configuration
+
+The highlight detection system is configured to:
+- Include 1-2 second buffers around key moments
+- Ensure highlights are at least 10 seconds long
+- Focus on the later half of videos where highlights typically occur
+- Filter out team kills, losing moments, and inappropriate content
+- Track and prevent duplicate clips across multiple compilations
+
+## 📝 Notes
+
+- Videos must be in MP4 format for compatibility with Gemini AI
+- The system identifies highlights based on your username "i have no enemies" in the kill feed
+- Kill feed entries with thin red outlines are included, while fully red highlights are excluded
+- Previously used clips are tracked in `used_clips.json` to prevent duplicates
+- The `exported_videos` directory contains all final compilations
+
+## 🤝 Contributing
+
+Feel free to submit issues, fork the repository, and create pull requests for any improvements.

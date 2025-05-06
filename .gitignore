@@ -36,3 +36,4 @@ clips.db
 compilation_plan_*.json
 output*.mp4
 output*.jpg
+*.json

@@ -1,0 +1,60 @@
+import json
+import os
+import logging
+from typing import Dict, Any
+
+logger = logging.getLogger(__name__)
+
+class Config:
+    _instance = None
+    _config: Dict[str, Any] = {}
+
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super(Config, cls).__new__(cls)
+            cls._instance._load_config()
+        return cls._instance
+
+    def _load_config(self):
+        config_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'config.json')
+        try:
+            with open(config_path, 'r') as f:
+                self._config = json.load(f)
+            logger.info("Successfully loaded configuration from config.json")
+        except FileNotFoundError:
+            logger.warning("config.json not found, using default values")
+            self._config = {
+                "batch_size": 25,
+                "model_name": "gemini-2.5-flash-preview-04-17",
+                "max_retries": 10,
+                "retry_delay_seconds": 2,
+                "min_highlight_duration_seconds": 10,
+                "username": "i have no enemies"
+            }
+        except json.JSONDecodeError as e:
+            logger.error(f"Error parsing config.json: {e}")
+            raise
+
+    @property
+    def batch_size(self) -> int:
+        return self._config.get("batch_size", 25)
+
+    @property
+    def model_name(self) -> str:
+        return self._config.get("model_name", "gemini-2.5-flash-preview-04-17")
+
+    @property
+    def max_retries(self) -> int:
+        return self._config.get("max_retries", 10)
+
+    @property
+    def retry_delay_seconds(self) -> int:
+        return self._config.get("retry_delay_seconds", 2)
+
+    @property
+    def min_highlight_duration_seconds(self) -> int:
+        return self._config.get("min_highlight_duration_seconds", 10)
+
+    @property
+    def username(self) -> str:
+        return self._config.get("username", "i have no enemies") 
