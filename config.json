@@ -5,5 +5,6 @@
     "retry_delay_seconds": 2,
     "min_highlight_duration_seconds": 15,
     "username": "i have no enemies",
-    "max_clips": 25
+    "max_clips": 25,
+    "allow_clip_reuse": false
 } 

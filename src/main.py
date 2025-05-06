@@ -5,6 +5,7 @@ from pathlib import Path
 from video_analysis import analyze_videos_sync
 from video_concatenator import concatenate_highlights
 from config import Config
+from clip_tracker import ClipTracker
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -57,15 +58,27 @@ def process_recent_clips(directory_path: str, output_file: str = "highlights.jso
         # Convert Path objects to strings
         video_paths = [str(f) for f in recent_files]
         
+        # Filter out previously used clips based on configuration
+        clip_tracker = ClipTracker(allow_clip_reuse=config.allow_clip_reuse)
+        video_paths = clip_tracker.filter_unused_clips(video_paths)
+        
+        if not video_paths:
+            logger.warning("No unused clips available for processing")
+            return
+            
         # Process videos in batches
         results = analyze_videos_sync(video_paths, output_file, batch_size)
         
         # Log summary of processing
         successful = sum(1 for _, highlights in results if highlights)
-        logger.info(f"Successfully processed {successful} out of {len(recent_files)} videos")
+        logger.info(f"Successfully processed {successful} out of {len(video_paths)} videos")
 
         # After analysis is complete and files are deleted from API, generate the final video
-        generate_highlight_video(output_file)
+        if successful > 0:
+            generate_highlight_video(output_file)
+            # Mark the successfully processed clips as used
+            successful_clips = [path for path, highlights in results if highlights]
+            clip_tracker.mark_clips_as_used(successful_clips)
 
     except Exception as e:
         logger.error(f"Error processing clips: {str(e)}")
@@ -92,7 +105,6 @@ def generate_highlight_video(highlights_json_path: str = "highlights.json") -> N
         raise
 
 if __name__ == "__main__":
-
     delete_highlights_file()
 
     if len(sys.argv) != 2:

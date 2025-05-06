@@ -30,7 +30,8 @@ class Config:
                 "retry_delay_seconds": 2,
                 "min_highlight_duration_seconds": 10,
                 "username": "i have no enemies",
-                "max_clips": 25
+                "max_clips": 25,
+                "allow_clip_reuse": False
             }
         except json.JSONDecodeError as e:
             logger.error(f"Error parsing config.json: {e}")
@@ -62,4 +63,8 @@ class Config:
 
     @property
     def max_clips(self) -> int:
-        return self._config.get("max_clips", 25) 
+        return self._config.get("max_clips", 25)
+
+    @property
+    def allow_clip_reuse(self) -> bool:
+        return self._config.get("allow_clip_reuse", False) 
