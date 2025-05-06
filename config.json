@@ -1,0 +1,8 @@
+{
+    "batch_size": 25,
+    "model_name": "gemini-2.5-flash-preview-04-17",
+    "max_retries": 10,
+    "retry_delay_seconds": 2,
+    "min_highlight_duration_seconds": 10,
+    "username": "i have no enemies"
+} 
