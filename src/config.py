@@ -29,7 +29,8 @@ class Config:
                 "max_retries": 10,
                 "retry_delay_seconds": 2,
                 "min_highlight_duration_seconds": 10,
-                "username": "i have no enemies"
+                "username": "i have no enemies",
+                "max_clips": 25
             }
         except json.JSONDecodeError as e:
             logger.error(f"Error parsing config.json: {e}")
@@ -57,4 +58,8 @@ class Config:
 
     @property
     def username(self) -> str:
-        return self._config.get("username", "i have no enemies") 
+        return self._config.get("username", "i have no enemies")
+
+    @property
+    def max_clips(self) -> int:
+        return self._config.get("max_clips", 25) 

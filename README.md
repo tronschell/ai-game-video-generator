@@ -1,4 +1,4 @@
-# CS2 Highlight Generator 🎮
+# Game Highlight Generator 🎮
 
 An intelligent highlight generator for Counter-Strike 2 gameplay videos that automatically identifies and compiles your best moments using Google's Gemini AI.
 
@@ -20,14 +20,14 @@ An intelligent highlight generator for Counter-Strike 2 gameplay videos that aut
 - Python 3.8 or higher
 - FFmpeg installed and available in your system PATH
 - Google API key for Gemini AI
-- Counter-Strike 2 gameplay recordings
+- Gameplay recordings, defaulting to Counter Strike 2 but can work with any game.
 
 ## 📦 Installation
 
 1. Clone the repository:
    ```bash
    git clone <repository-url>
-   cd cs2-highlight-generator
+   cd video-highlight-generator
    ```
 
 2. Create and activate a virtual environment:
@@ -80,14 +80,26 @@ The script will:
 - `delete_files.py`: Cleanup utilities
 - `logging_config.py`: Logging configuration
 
-## ⚙️ Configuration
+### config.json
+The following parameters can be customized in `config.json`:
 
-The highlight detection system is configured to:
-- Include 1-2 second buffers around key moments
-- Ensure highlights are at least 10 seconds long
-- Focus on the later half of videos where highlights typically occur
-- Filter out team kills, losing moments, and inappropriate content
-- Track and prevent duplicate clips across multiple compilations
+- `batch_size`: Number of clips to process concurrently (default: 10)
+- `model_name`: Gemini model version to use (default: "gemini-2.5-flash-preview-04-17")
+- `max_retries`: Maximum API retry attempts (default: 14)
+- `retry_delay_seconds`: Delay between retries in seconds (default: 2)
+- `min_highlight_duration_seconds`: Minimum duration for a highlight clip (default: 15)
+- `username`: Your in-game username for highlight detection (default: "i have no enemies")
+- `max_clips`: Maximum number of clips to process in one session (default: 25)
+
+### Customizing Prompts
+The analysis prompts can be customized in `src/prompts.py`. The main prompt template (`CS2_HIGHLIGHT_PROMPT`) defines:
+
+- Timestamp requirements and formatting
+- Highlight criteria for clip selection
+- Exclusion criteria
+- Example highlight formats
+
+You can modify these criteria to better suit your needs while maintaining the required timestamp format and structure.
 
 ## 📝 Notes
 

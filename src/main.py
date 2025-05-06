@@ -1,17 +1,26 @@
 import os
+import sys
 import logging
-import asyncio
 from pathlib import Path
-from typing import List
-from datetime import datetime
 from video_analysis import analyze_videos_sync
 from video_concatenator import concatenate_highlights
+from config import Config
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-def process_recent_clips(directory_path: str, output_file: str = "highlights.json", batch_size: int = 10) -> None:
+def delete_highlights_file(highlights_json_path: str = "highlights.json") -> None:
+    """
+    Delete the highlights.json file.
+    
+    Args:
+        highlights_json_path: Path to the JSON file containing highlight information
+    """
+    if os.path.exists(highlights_json_path):
+        os.remove(highlights_json_path)
+
+def process_recent_clips(directory_path: str, output_file: str = "highlights.json", batch_size: int = 5) -> None:
     """
     Process the 25 most recently created video clips in the specified directory.
     
@@ -40,8 +49,9 @@ def process_recent_clips(directory_path: str, output_file: str = "highlights.jso
         # Sort files by creation time (newest first)
         video_files.sort(key=lambda x: x.stat().st_ctime, reverse=True)
         
-        # Take the 25 most recent files
-        recent_files = video_files[:25]
+        # Get the configured number of clips
+        config = Config()
+        recent_files = video_files[:config.max_clips]
         logger.info(f"Found {len(recent_files)} recent video files to process")
 
         # Convert Path objects to strings
@@ -82,7 +92,9 @@ def generate_highlight_video(highlights_json_path: str = "highlights.json") -> N
         raise
 
 if __name__ == "__main__":
-    import sys
+
+    delete_highlights_file()
+
     if len(sys.argv) != 2:
         print("Usage: python main.py <directory_path>")
         sys.exit(1)

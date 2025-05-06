@@ -5,17 +5,19 @@ import asyncio
 from typing import List, Dict, Any, Tuple
 import dotenv
 from google import genai
+from google.genai import types
 from google.genai.types import GenerateContentConfig
 from pathlib import Path
 from functools import partial
 from delete_files import FileDeleter
-from .config import Config
+from config import Config
+from prompts import CS2_HIGHLIGHT_PROMPT
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-async def analyze_videos_batch(video_paths: List[str], output_file: str = "highlights.json", batch_size: int = None) -> List[Tuple[str, List[Dict[str, Any]]]]:
+async def analyze_videos_batch(video_paths: List[str], output_file: str = "highlights.json", batch_size: int = None, prompt_template=CS2_HIGHLIGHT_PROMPT) -> List[Tuple[str, List[Dict[str, Any]]]]:
     """
     Analyze multiple videos in batches using Gemini.
     
@@ -23,6 +25,7 @@ async def analyze_videos_batch(video_paths: List[str], output_file: str = "highl
         video_paths: List of paths to video files
         output_file: Path to the JSON file where highlights will be saved
         batch_size: Number of videos to process concurrently
+        prompt_template: Template string for the analysis prompt
         
     Returns:
         List of tuples containing (video_path, highlights)
@@ -47,7 +50,7 @@ async def analyze_videos_batch(video_paths: List[str], output_file: str = "highl
             # Process batch concurrently
             try:
                 batch_results = await asyncio.gather(
-                    *(analyze_video(video_path, output_file) for video_path in batch),
+                    *(analyze_video(video_path, output_file, prompt_template) for video_path in batch),
                     return_exceptions=True
                 )
                 
@@ -79,8 +82,15 @@ async def analyze_videos_batch(video_paths: List[str], output_file: str = "highl
     
     return results
 
-async def analyze_video(video_path: str, output_file: str = "highlights.json") -> List[Dict[str, Any]]:
-    """Analyze a video file using Gemini and append results to JSON file"""
+async def analyze_video(video_path: str, output_file: str = "highlights.json", prompt_template=CS2_HIGHLIGHT_PROMPT) -> List[Dict[str, Any]]:
+    """
+    Analyze a video file using Gemini and append results to JSON file
+    
+    Args:
+        video_path: Path to the video file to analyze
+        output_file: Path to the JSON file where highlights will be saved
+        prompt_template: Template string for the analysis prompt
+    """
     config = Config()
     
     try:
@@ -137,35 +147,18 @@ async def analyze_video(video_path: str, output_file: str = "highlights.json") -
                         "required": ["highlights"]
                     }
 
-                    prompt = f"""
-                        Analyze this Counter-Strike 2 gameplay clip and identify highlight moments.
-                        
-                        For each highlight moment:
-                        1. Ensure that each highlight is from my username: "{config.username}" in which the kill feed will be a thin red outline/border. If the kill feed has a highlighted entirely highlghted red , then dont inlcude it.
-                        2. Ensure that there are no more highlights after the selected timestamps so for example if there is a kill at a certain timestamp, if you think there's a highlight after that kill as well, please include it within that timestamp start and end.
-                        3. Think about the context of the round and the clip, if a clip doesnt make sense in the context of the round, then dont include it. For example if there are kills already from me on the kill feed, please try your best to include the moments where those kills pop up in the feed.
-                        4. Provide timestamps in seconds format. For example if a moment is at 1:40, the timestamp should be 100 because its in SECONDS.
-                        5. Include 1-2 seconds buffer before/after key moments especially remember to include a 1 second buffer after the last kill within the highlight.
-                        6. Ensure each highlight is at least {config.min_highlight_duration_seconds} seconds long
-                        7. Usually the highlights are at the later half of the video duration since when I click the highlight button, it is usually at the end of the video.
-                        8. Focus on:
-                           - Clutch situations (1v3, 1v4, 1v5)
-                           - Impressive kills (headshots, multikills)
-                           - Emotional reactions (loud microphone moments)
-                        
-                        Do not include the following:
-                        - Team kills
-                        - Losing moments
-                        - Trolling
-                        - Racist comments/language
-                        - Assists (unless it's a part of a larger highlight)
-                    """
+                    # Generate the prompt using the template
+                    prompt = prompt_template.substitute(
+                        min_highlight_duration_seconds=config.min_highlight_duration_seconds,
+                        username=config.username
+                    )
 
                     # Configure the generation
                     config_gen = GenerateContentConfig(
                         response_mime_type="application/json",
                         response_schema=highlight_schema,
-                        temperature=0.5
+                        thinking_config=types.ThinkingConfig(thinking_budget=20000),
+                        temperature=0.9
                     )
 
                     # Create content parts using the uploaded file
@@ -250,7 +243,7 @@ async def analyze_video(video_path: str, output_file: str = "highlights.json") -
         logger.error(f"Unexpected error analyzing video {video_path}: {str(e)}")
         raise
 
-def analyze_videos_sync(video_paths: List[str], output_file: str = "highlights.json", batch_size: int = None) -> List[Tuple[str, List[Dict[str, Any]]]]:
+def analyze_videos_sync(video_paths: List[str], output_file: str = "highlights.json", batch_size: int = None, prompt_template=CS2_HIGHLIGHT_PROMPT) -> List[Tuple[str, List[Dict[str, Any]]]]:
     """
     Synchronous wrapper for analyze_videos_batch
     
@@ -258,25 +251,26 @@ def analyze_videos_sync(video_paths: List[str], output_file: str = "highlights.j
         video_paths: List of paths to video files
         output_file: Path to the JSON file where highlights will be saved
         batch_size: Number of videos to process concurrently
+        prompt_template: Template string for the analysis prompt
         
     Returns:
         List of tuples containing (video_path, highlights)
     """
-    return asyncio.run(analyze_videos_batch(video_paths, output_file, batch_size))
+    return asyncio.run(analyze_videos_batch(video_paths, output_file, batch_size, prompt_template))
 
-# Keep the original analyze_video_sync as a convenience function for single videos
-def analyze_video_sync(video_path: str, output_file: str = "highlights.json") -> List[Dict[str, Any]]:
+def analyze_video_sync(video_path: str, output_file: str = "highlights.json", prompt_template=CS2_HIGHLIGHT_PROMPT) -> List[Dict[str, Any]]:
     """
     Synchronous wrapper for analyze_video
     
     Args:
         video_path: Path to the video file to analyze
         output_file: Path to the JSON file where highlights will be saved
+        prompt_template: Template string for the analysis prompt
         
     Returns:
         List of highlights
     """
-    results = analyze_videos_sync([video_path], output_file)
+    results = analyze_videos_sync([video_path], output_file, prompt_template=prompt_template)
     return results[0][1] if results else []
 
 
