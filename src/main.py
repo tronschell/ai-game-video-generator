@@ -14,21 +14,21 @@ logger = logging.getLogger(__name__)
 def delete_highlights_file(highlights_json_path: str = "highlights.json") -> None:
     """
     Delete the highlights.json file.
-    
+
     Args:
         highlights_json_path: Path to the JSON file containing highlight information
     """
     if os.path.exists(highlights_json_path):
         os.remove(highlights_json_path)
 
-def process_recent_clips(directory_path: str, output_file: str = "highlights.json", batch_size: int = 5) -> None:
+def process_recent_clips(directory_path: str, output_file: str = "highlights.json", batch_size: int = 10) -> None:
     """
-    Process the 25 most recently created video clips in the specified directory.
-    
+    Process video clips in the specified directory, sorted by creation date and filtered for unused clips.
+
     Args:
         directory_path: Path to the directory containing video clips
         output_file: Path to the JSON file where highlights will be saved
-        batch_size: Number of videos to process concurrently (default: 5)
+        batch_size: Number of videos to process concurrently (default: 10)
     """
     try:
         # Convert to Path object for easier handling
@@ -39,7 +39,7 @@ def process_recent_clips(directory_path: str, output_file: str = "highlights.jso
         # Get all video files (common video extensions)
         video_extensions = ('.mp4', '.avi', '.mov', '.mkv', '.wmv')
         video_files = []
-        
+
         for ext in video_extensions:
             video_files.extend(dir_path.glob(f"*{ext}"))
 
@@ -49,26 +49,29 @@ def process_recent_clips(directory_path: str, output_file: str = "highlights.jso
 
         # Sort files by creation time (newest first)
         video_files.sort(key=lambda x: x.stat().st_ctime, reverse=True)
-        
-        # Get the configured number of clips
-        config = Config()
-        recent_files = video_files[:config.max_clips]
-        logger.info(f"Found {len(recent_files)} recent video files to process")
 
         # Convert Path objects to strings
-        video_paths = [str(f) for f in recent_files]
-        
-        # Filter out previously used clips based on configuration
-        clip_tracker = ClipTracker(allow_clip_reuse=config.allow_clip_reuse)
+        video_paths = [str(f) for f in video_files]
+
+        # Filter out previously used clips
+        clip_tracker = ClipTracker(allow_clip_reuse=False)  # Always set to False as per requirement
         video_paths = clip_tracker.filter_unused_clips(video_paths)
-        
+
+        # Get the configured number of clips after filtering
+        config = Config()
+        if len(video_paths) > config.max_clips:
+            video_paths = video_paths[:config.max_clips]
+            logger.info(f"Using {config.max_clips} most recent unused clips")
+        else:
+            logger.info(f"Using all {len(video_paths)} available unused clips")
+
         if not video_paths:
             logger.warning("No unused clips available for processing")
             return
-            
+
         # Process videos in batches
         results = analyze_videos_sync(video_paths, output_file, batch_size)
-        
+
         # Log summary of processing
         successful = sum(1 for _, highlights in results if highlights)
         logger.info(f"Successfully processed {successful} out of {len(video_paths)} videos")
@@ -87,7 +90,7 @@ def process_recent_clips(directory_path: str, output_file: str = "highlights.jso
 def generate_highlight_video(highlights_json_path: str = "highlights.json") -> None:
     """
     Generate the final highlight video after analysis is complete.
-    
+
     Args:
         highlights_json_path: Path to the JSON file containing highlight information
     """
@@ -110,5 +113,5 @@ if __name__ == "__main__":
     if len(sys.argv) != 2:
         print("Usage: python main.py <directory_path>")
         sys.exit(1)
-    
+
     process_recent_clips(sys.argv[1])

@@ -31,7 +31,8 @@ class Config:
                 "min_highlight_duration_seconds": 10,
                 "username": "i have no enemies",
                 "max_clips": 25,
-                "allow_clip_reuse": False
+                "allow_clip_reuse": False,
+                "temperature": 1.0
             }
         except json.JSONDecodeError as e:
             logger.error(f"Error parsing config.json: {e}")
@@ -68,3 +69,7 @@ class Config:
     @property
     def allow_clip_reuse(self) -> bool:
         return self._config.get("allow_clip_reuse", False) 
+        
+    @property
+    def temperature(self) -> float:
+        return self._config.get("temperature", 1.0)

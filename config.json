@@ -1,10 +1,11 @@
 {
-    "batch_size": 10,
-    "model_name": "gemini-2.5-flash-preview-04-17",
-    "max_retries": 14,
-    "retry_delay_seconds": 2,
-    "min_highlight_duration_seconds": 15,
-    "username": "i have no enemies",
-    "max_clips": 25,
-    "allow_clip_reuse": false
-} 
+  "batch_size": 10,
+  "model_name": "gemini-2.5-flash-preview-04-17",
+  "max_retries": 14,
+  "retry_delay_seconds": 2,
+  "min_highlight_duration_seconds": 17,
+  "username": "i have no enemies",
+  "max_clips": 25,
+  "allow_clip_reuse": true,
+  "temperature": 0.8
+}

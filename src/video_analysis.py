@@ -17,43 +17,43 @@ from prompts import CS2_HIGHLIGHT_PROMPT
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-async def analyze_videos_batch(video_paths: List[str], output_file: str = "highlights.json", batch_size: int = None, prompt_template=CS2_HIGHLIGHT_PROMPT) -> List[Tuple[str, List[Dict[str, Any]]]]:
+async def analyze_videos_batch(video_paths: List[str], output_file: str = "highlights.json", batch_size: int = 10, prompt_template=CS2_HIGHLIGHT_PROMPT) -> List[Tuple[str, List[Dict[str, Any]]]]:
     """
     Analyze multiple videos in batches using Gemini.
-    
+
     Args:
         video_paths: List of paths to video files
         output_file: Path to the JSON file where highlights will be saved
         batch_size: Number of videos to process concurrently
         prompt_template: Template string for the analysis prompt
-        
+
     Returns:
         List of tuples containing (video_path, highlights)
     """
     config = Config()
     batch_size = batch_size or config.batch_size
-    
+
     results = []
-    
+
     # Get API key once for both analysis and cleanup
     dotenv.load_dotenv()
     api_key = os.getenv("GOOGLE_API_KEY")
     if not api_key:
         raise ValueError("GOOGLE_API_KEY not found in environment variables")
-    
+
     try:
         # Process videos in batches
         for i in range(0, len(video_paths), batch_size):
             batch = video_paths[i:i + batch_size]
-            logger.info(f"Processing batch of {len(batch)} videos (batch {i//batch_size + 1})")
-            
+            logger.info(f"Processing video batch {i//batch_size + 1} ({len(batch)} videos)")
+
             # Process batch concurrently
             try:
                 batch_results = await asyncio.gather(
                     *(analyze_video(video_path, output_file, prompt_template) for video_path in batch),
                     return_exceptions=True
                 )
-                
+
                 # Handle results and any exceptions
                 for video_path, result in zip(batch, batch_results):
                     if isinstance(result, Exception):
@@ -61,48 +61,48 @@ async def analyze_videos_batch(video_paths: List[str], output_file: str = "highl
                         results.append((video_path, []))
                     else:
                         results.append((video_path, result))
-                
-                logger.info(f"Completed batch {i//batch_size + 1}")
-                
+
+                logger.info(f"✓ Completed batch {i//batch_size + 1}")
+
             except Exception as e:
                 logger.error(f"Error processing batch: {str(e)}")
                 # Add empty results for failed batch
                 for video_path in batch:
                     results.append((video_path, []))
-    
+
     finally:
         # Cleanup: Delete all files from Google Files API
         try:
-            logger.info("Starting cleanup: Deleting files from Google Files API")
+            logger.info("Cleaning up temporary API files...")
             file_deleter = FileDeleter(api_key=api_key)
             file_deleter.delete_all_files()
-            logger.info("Successfully cleaned up files from Google Files API")
+            logger.info("✓ Cleanup complete")
         except Exception as e:
             logger.error(f"Failed to cleanup files from Google Files API: {str(e)}")
-    
+
     return results
 
 async def analyze_video(video_path: str, output_file: str = "highlights.json", prompt_template=CS2_HIGHLIGHT_PROMPT) -> List[Dict[str, Any]]:
     """
     Analyze a video file using Gemini and append results to JSON file
-    
+
     Args:
         video_path: Path to the video file to analyze
         output_file: Path to the JSON file where highlights will be saved
         prompt_template: Template string for the analysis prompt
     """
     config = Config()
-    
+
     try:
         # Validate video file
         if not os.path.exists(video_path):
             raise FileNotFoundError(f"Video file not found: {video_path}")
-            
+
         # Check if it's actually a video file (Gemini supports MP4)
         if not video_path.lower().endswith('.mp4'):
             raise ValueError(f"File must be in MP4 format for best compatibility with Gemini")
-            
-        logger.info(f"Starting analysis of video: {video_path}")
+
+        logger.info(f"Analyzing video: {os.path.basename(video_path)}")
 
         # Initialize Gemini client
         dotenv.load_dotenv()
@@ -111,20 +111,19 @@ async def analyze_video(video_path: str, output_file: str = "highlights.json", p
             raise ValueError("GOOGLE_API_KEY not found in environment variables")
 
         client = genai.Client(api_key=api_key)
-        
+
         try:
             # Upload the video file using a thread pool to not block
-            logger.info("Uploading video file to Gemini API")
+            logger.debug("Uploading video to API...")
             loop = asyncio.get_event_loop()
             video_file = await loop.run_in_executor(
-                None, 
+                None,
                 partial(client.files.upload, file=Path(video_path))
             )
-            logger.debug(f"Successfully uploaded video file with URI: {video_file.uri}")
-            
+
             # Wait for file to be processed
             retry_delay = config.retry_delay_seconds
-            
+
             for attempt in range(config.max_retries):
                 try:
                     # Define the schema for structured output with seconds format
@@ -157,8 +156,8 @@ async def analyze_video(video_path: str, output_file: str = "highlights.json", p
                     config_gen = GenerateContentConfig(
                         response_mime_type="application/json",
                         response_schema=highlight_schema,
-                        thinking_config=types.ThinkingConfig(thinking_budget=20000),
-                        temperature=0.9
+                        thinking_config=types.ThinkingConfig(thinking_budget=10000),
+                        temperature=config.temperature
                     )
 
                     # Create content parts using the uploaded file
@@ -177,20 +176,20 @@ async def analyze_video(video_path: str, output_file: str = "highlights.json", p
                             config=config_gen
                         )
                     )
-                    
+
                     logger.debug("Successfully received response from Gemini API")
                     break
-                    
+
                 except Exception as e:
                     if "FAILED_PRECONDITION" in str(e) and attempt < config.max_retries - 1:
-                        logger.info(f"File still processing, retrying in {retry_delay} seconds (attempt {attempt + 1}/{config.max_retries})")
+                        logger.debug(f"File processing in progress, retry {attempt + 1}/{config.max_retries} in {retry_delay:.1f}s")
                         await asyncio.sleep(retry_delay)
                         retry_delay *= 1.5  # Exponential backoff
                         continue
                     raise  # Re-raise the exception if it's not a precondition error or we're out of retries
-            
+
             response_json = json.loads(response.text)
-            
+
             if not isinstance(response_json, dict) or "highlights" not in response_json:
                 raise ValueError("Invalid response format from API")
 
@@ -204,11 +203,11 @@ async def analyze_video(video_path: str, output_file: str = "highlights.json", p
                     "clip_description": highlight["clip_description"]
                 }
                 processed_highlights.append(processed_highlight)
-                
+
             # Save to file if output_file is specified
             if output_file:
                 os.makedirs(os.path.dirname(os.path.abspath(output_file)), exist_ok=True)
-                
+
                 # Initialize file if it doesn't exist
                 if not os.path.exists(output_file):
                     with open(output_file, 'w') as f:
@@ -217,15 +216,15 @@ async def analyze_video(video_path: str, output_file: str = "highlights.json", p
                 # Read existing data
                 with open(output_file, 'r') as f:
                     existing_data = json.load(f)
-                
+
                 # Append new highlights
                 existing_data["highlights"].extend(processed_highlights)
-                
+
                 with open(output_file, 'w') as f:
                     json.dump(existing_data, f, indent=2)
-                
-                logger.info(f"Successfully appended {len(processed_highlights)} highlights to {output_file}")
-            
+
+                logger.info(f"✓ Found {len(processed_highlights)} highlights in {os.path.basename(video_path)}")
+
             return processed_highlights
 
         except json.JSONDecodeError as e:
@@ -246,13 +245,13 @@ async def analyze_video(video_path: str, output_file: str = "highlights.json", p
 def analyze_videos_sync(video_paths: List[str], output_file: str = "highlights.json", batch_size: int = None, prompt_template=CS2_HIGHLIGHT_PROMPT) -> List[Tuple[str, List[Dict[str, Any]]]]:
     """
     Synchronous wrapper for analyze_videos_batch
-    
+
     Args:
         video_paths: List of paths to video files
         output_file: Path to the JSON file where highlights will be saved
         batch_size: Number of videos to process concurrently
         prompt_template: Template string for the analysis prompt
-        
+
     Returns:
         List of tuples containing (video_path, highlights)
     """
@@ -261,17 +260,14 @@ def analyze_videos_sync(video_paths: List[str], output_file: str = "highlights.j
 def analyze_video_sync(video_path: str, output_file: str = "highlights.json", prompt_template=CS2_HIGHLIGHT_PROMPT) -> List[Dict[str, Any]]:
     """
     Synchronous wrapper for analyze_video
-    
+
     Args:
         video_path: Path to the video file to analyze
         output_file: Path to the JSON file where highlights will be saved
         prompt_template: Template string for the analysis prompt
-        
+
     Returns:
         List of highlights
     """
     results = analyze_videos_sync([video_path], output_file, prompt_template=prompt_template)
     return results[0][1] if results else []
-
-
-

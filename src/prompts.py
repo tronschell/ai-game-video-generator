@@ -1,45 +1,73 @@
 from string import Template
 
 CS2_HIGHLIGHT_PROMPT = Template('''
-Analyze this Counter-Strike 2 gameplay clip and identify highlight moments.
-You MUST watch the entire video FIRST before identifying any highlights.
+    Analyze the provided Counter-Strike Global Offensive gameplay clip to identify highlight moments featuring player "${username}".
 
-TIMESTAMP REQUIREMENTS (CRITICAL):
-1. All timestamps MUST be in SECONDS format (e.g., 1:40 should be written as 100 seconds)
-2. Each highlight MUST be at least ${min_highlight_duration_seconds} seconds long
-3. Add exactly 1 second buffer BEFORE the first kill/action in a highlight
-4. Add exactly 1 second buffer AFTER the last kill/action in a highlight
-5. For clutch situations, include the ENTIRE round from the moment it becomes a clutch
-6. If there are multiple highlights in a single round, please include all of them.
-7. There is always a highlight in each video, you must find it and output at LEAST one highlight.
+    VARIABLES:
+    - Player of Interest: "${username}"
+    - Minimum Highlight Duration: ${min_highlight_duration_seconds} seconds
 
-HIGHLIGHT CRITERIA (MUST INCLUDE ONLY):
-1. Kills by "${username}" ONLY - identifiable by thin red outline in kill feed
-2. Clutch situations (1vX) - Include full round context
-3. Multi-kills (3k, 4k, 5k) in a single round
-4. Impressive kills (clean headshots, flicks)
-5. Positive emotional reactions (hype moments)
-6. Ensure that I ${username} is the one doing the killing by looking at the kill feed on the top right.
+    OUTPUT REQUIREMENTS:
+    - Output MUST be a JSON list of highlight objects.
+    - Only if there are no kills by "${username}" in the video at all, output an empty list [] or do not return anything.
+    - In every video you analyze should have a highlight.
+    - Each highlight object MUST contain:
+        - "timestamp_start_seconds": number (integer, e.g., 55)
+        - "timestamp_end_seconds": number (integer, e.g., 90)
+        - "clip_description": string (e.g., "${username} gets a 3k with pistol and FAMAS. CHECK1. kill 1 (36 seconds, 4th round, "hillbilly"), kill 2 (45 seconds, 4th round, "the"), kill 3 on (82 seconds, 4th round, "tenz"), and kill 4 on (120 seconds, 5th round, optimus prime).")
+    - After a timestamp has been identified, replay this timestamp to ensure that we encapsulate the entire highlight and ensure it is accurate without missing any extra kills.
 
-DO NOT INCLUDE:
-1. Team kills
-2. Deaths/losing moments
-3. Assists (shown as [player] + ${username} in feed)
-4. Spectator clips (identifiable by "[Mouse 1] Next Player" white text on the bottom of the screen (please always look for this in every clip))
-5. Round end moments (unless part of a highlight)
-6. Toxic/racist comments
-8. Trolling moments
-9. Clips that do not include me ${username}
+    VIDEO PROCESSING INSTRUCTIONS:
+    1. Analyze the entire video before identifying timestamps.
+    2. Prioritize accuracy in identifying kills by "${username}" based on the kill feed.
+    3. For videos with a User/Character icons on the top middle of the screen, do not pay attention to the information around this section as it can be misleading.
+    4. (CRITICAL) When watching each video, keep a count of number of kills made by "${username}" and its associated timestamp, what round it occurred in (those are the 2 numbers in the top middle of the screen directly underneath the timer, for example 4 and 3 = round 8 since the current game is always + 1 or 12 and 11 meaning round 13) for your own thinking, and the name person that ${username} killed which can be found in the kill feed (top right corner).
+    5. (CRITICAL) Appended to the end of the clip_description, include the kill count timestamps for each kill, and the person killed from your memory based on the previous instruction. For example, "kill 1 (36 seconds, 4th round, "hillbilly"), kill 2 (45 seconds, 4th round, "the"), kill 3 on (82 seconds, 4th round, "tenz"), and kill 4 on (120 seconds, 5th round, optimus prime)."
 
-EXAMPLE HIGHLIGHT FORMAT:
-- "timestamp_start_seconds": 55,
-- "timestamp_end_seconds": 90,
-- "clip_description": "${username} gets a 3k with pistol and FAMAS."
+    HIGHLIGHT IDENTIFICATION CRITERIA (Strictly Adhere):
 
-EXAMPLE HIGHLIGHT FORMAT 2:
-- "timestamp_start_seconds": 100,
-- "timestamp_end_seconds": 150,
-- "clip_description": "${username} Gets 4 kills in a row on B site."
+    A. CONTENT TO INCLUDE (ONLY these moments qualify as highlights):
+        1. Every and all kills made by "${username}". These are identifiable by a thin red outline around "${username}"'s name in the kill feed (top right of the screen).
+        2. If multiple kills by "${username}" occur in rapid succession or a continuous action sequence, group them into a single highlight clip.
+        3. For confirmed clutch situations, the highlight should begin from the moment the clutch situation is clearly established and include all subsequent kills by "${username}" in that round.
 
-After you have identified a/some potential timestamp(s), please list out the HIGHLIGHT CRITERIA again and the DO NOT INCLUDE criteria again, make sure that the timestamp you chose follows those criteria before you finish your decision.
-''') 
+    B. TIMESTAMPING RULES (CRITICAL):
+        1. All timestamps MUST be in total SECONDS (e.g., 90 for 1:30).
+        2. Each individual highlight segment (from start buffer to end buffer) MUST be at least ${min_highlight_duration_seconds} seconds long. If a qualifying kill sequence with buffers is shorter, it should not be included unless it's part of a larger valid sequence.
+        3. Add exactly a 1-second buffer BEFORE the first relevant action (e.g., first kill) in a highlight sequence.
+        4. Add exactly a 1-second buffer AFTER the last relevant action (e.g., last kill) in a highlight sequence.
+        5. If multiple distinct highlight-worthy action sequences by "${username}" occur in a single round but are separated by significant non-action periods like walking around, create separate highlight entries for each.
+
+    C. CONTENT TO EXCLUDE (DO NOT INCLUDE any of the following):
+        2. Deaths or any moments where "${username}" is eliminated.
+        5. Spectator mode footage (often identifiable by "[Mouse 1] Next Player" text or similar spectator UI elements at the bottom of the screen).
+        6. Round win/loss announcements, unless they are an immediate part of the kill action sequence.
+        7. Any toxic commentary, racist remarks, or trolling behavior visible or audible.
+
+    D. CONTENT TO CUT OUT/SHORTEN:
+        1. Any moments where "${username}" does not secure a kill. This includes:
+            - General gameplay (walking, rotating).
+            - Buying weapons or pre-round setup.
+            - Moments where "${username}" is shooting but does not confirm a kill (check kill feed on top right).
+
+    VERIFICATION STEP (For your internal process before finalizing output):
+    - For each potential highlight:
+        1. Confirm "${username}" (with red outline in kill feed) is the one getting the kill(s). This is can be confirmed by always checking the top right corner of the video in the format of ${username} + a picture of the weapon they used to kill someone + the person that was killed. Include "CHECK1" in the `clip_description` to confirm this check.
+        2. Verify the timestamp adheres to all buffer and minimum duration rules and please do not cut the highlight too short.
+        3. Ensure no excluded content is present.
+        4. After every other step is done, verify that there is no excessive walking/downtime in the clip and that there's nothing important that happens immediately before or after the highlight. If there is excessive walking, trim down the video to exclude those parts. If there are more parts to the highlight, please expand the highlighted timestamps.
+
+    EXAMPLE HIGHLIGHT FORMAT:
+    [
+      {
+        "timestamp_start_seconds": 55,
+        "timestamp_end_seconds": 90,
+        "clip_description": "${username} gets a 3k with pistol and FAMAS. CHECK1. kill 1 (36 seconds, 4th round, "hillbilly"), kill 2 (45 seconds, 4th round, "the"), kill 3 on (82 seconds, 4th round, "tenz"), and kill 4 on (120 seconds, 5th round, optimus prime)."
+      },
+      {
+        "timestamp_start_seconds": 100,
+        "timestamp_end_seconds": 115,
+        "clip_description": "${username} secures two quick AWP kills on B site. CHECK1. kill 1 (36 seconds, 4th round, "hillbilly"), kill 2 (45 seconds, 4th round, "the"), kill 3 on (82 seconds, 4th round, "tenz"), and kill 4 on (120 seconds, 5th round, optimus prime)."
+      }
+    ]
+    ''')
