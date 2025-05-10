@@ -32,7 +32,10 @@ class Config:
                 "username": "i have no enemies",
                 "max_clips": 25,
                 "allow_clip_reuse": False,
-                "temperature": 1.0
+                "temperature": 1.0,
+                "use_caching": False,
+                "cache_ttl_seconds": 3600,
+                "skip_videos": 0
             }
         except json.JSONDecodeError as e:
             logger.error(f"Error parsing config.json: {e}")
@@ -73,3 +76,15 @@ class Config:
     @property
     def temperature(self) -> float:
         return self._config.get("temperature", 1.0)
+
+    @property
+    def use_caching(self) -> bool:
+        return self._config.get("use_caching", True)
+
+    @property
+    def cache_ttl_seconds(self) -> int:
+        return self._config.get("cache_ttl_seconds", 3600)
+
+    @property
+    def skip_videos(self) -> int:
+        return self._config.get("skip_videos", 0)

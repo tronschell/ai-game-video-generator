@@ -37,3 +37,7 @@ compilation_plan_*.json
 output*.mp4
 output*.jpg
 highlights.json
+*.csv
+used_clips.json
+
+

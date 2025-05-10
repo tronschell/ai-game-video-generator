@@ -1,15 +1,18 @@
 import os
 import sys
-import logging
 from pathlib import Path
 from video_analysis import analyze_videos_sync
 from video_concatenator import concatenate_highlights
 from config import Config
 from clip_tracker import ClipTracker
+from logging_config import setup_logging
+import logging
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
+# Get module-specific logger
 logger = logging.getLogger(__name__)
+
+# Initialize logging at startup
+setup_logging()
 
 def delete_highlights_file(highlights_json_path: str = "highlights.json") -> None:
     """
@@ -59,6 +62,15 @@ def process_recent_clips(directory_path: str, output_file: str = "highlights.jso
 
         # Get the configured number of clips after filtering
         config = Config()
+        
+        # Apply skip_videos configuration
+        if config.skip_videos > 0:
+            if config.skip_videos >= len(video_paths):
+                logger.warning(f"Skipping all {len(video_paths)} videos as skip_videos ({config.skip_videos}) >= available videos")
+                return
+            video_paths = video_paths[config.skip_videos:]
+            logger.info(f"Skipped {config.skip_videos} videos as per configuration")
+
         if len(video_paths) > config.max_clips:
             video_paths = video_paths[:config.max_clips]
             logger.info(f"Using {config.max_clips} most recent unused clips")
@@ -113,5 +125,5 @@ if __name__ == "__main__":
     if len(sys.argv) != 2:
         print("Usage: python main.py <directory_path>")
         sys.exit(1)
-
+    
     process_recent_clips(sys.argv[1])

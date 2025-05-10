@@ -6,10 +6,8 @@ from typing import List, Dict
 import time
 from datetime import datetime
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
+# Get module-specific logger
+logger = logging.getLogger(__name__)
 
 def parse_video_timestamp(filename: str) -> datetime:
     """
@@ -34,7 +32,7 @@ def parse_video_timestamp(filename: str) -> datetime:
         
         return datetime(year, month, day, hour, minute, second)
     except Exception as e:
-        logging.error(f"Error parsing timestamp from filename {filename}: {str(e)}")
+        logger.error(f"Error parsing timestamp from filename {filename}: {str(e)}")
         # Return epoch time as fallback
         return datetime(1970, 1, 1)
 
@@ -106,6 +104,7 @@ def concatenate_highlights(highlights_json_path: str = 'highlights.json') -> Non
     os.makedirs(temp_dir, exist_ok=True)
 
     cut_segments = []
+    ts_segments = []
     try:
         # Read the highlights.json file
         with open(highlights_json_path, 'r') as f:
@@ -113,7 +112,7 @@ def concatenate_highlights(highlights_json_path: str = 'highlights.json') -> Non
             highlights = data.get('highlights', [])
 
         if not highlights:
-            logging.warning("No highlights found in the JSON file")
+            logger.warning("No highlights found in the JSON file")
             return
 
         # Merge overlapping highlights
@@ -138,55 +137,70 @@ def concatenate_highlights(highlights_json_path: str = 'highlights.json') -> Non
                 f'-avoid_negative_ts make_zero -fflags +genpts '
                 f'-map 0:v:0 -map 0:a:0? "{segment_file}"'
             )
-            logging.info(f"Cutting segment {idx + 1}/{len(highlights)} from {os.path.basename(source_video)}")
-            logging.debug(f"Cut command: {cut_cmd}")
+            logger.info(f"Cutting segment {idx + 1}/{len(highlights)} from {os.path.basename(source_video)}")
+            logger.debug(f"Cut command: {cut_cmd}")
             os.system(cut_cmd)
             cut_segments.append(segment_file)
+            
+            # Convert to TS format to fix non-monotonic DTS errors
+            ts_file = os.path.join(temp_dir, f'segment_{idx:03d}.ts')
+            ts_cmd = (
+                f'ffmpeg -fflags +igndts -i "{segment_file}" '
+                f'-c copy -bsf:v h264_mp4toannexb "{ts_file}"'
+            )
+            logger.info(f"Converting segment {idx + 1}/{len(highlights)} to TS format (no re-encoding)")
+            logger.debug(f"TS conversion command: {ts_cmd}")
+            os.system(ts_cmd)
+            ts_segments.append(ts_file)
 
-        # Create concat list with only the clean cut segments
+        # Create concat list with the TS segments
         concat_list_path = os.path.join(temp_dir, 'concat_list.txt')
         with open(concat_list_path, 'w') as f:
-            for segment in cut_segments:
+            for segment in ts_segments:
                 f.write(f"file '{os.path.basename(segment)}'\n")
 
-        # First, check the number of audio streams in the first segment
-        probe_cmd = f'ffprobe -v error -select_streams a -show_entries stream=index -of csv=p=0 "{cut_segments[0]}"'
+        # First, check the number of audio streams in the first TS segment
+        probe_cmd = f'ffprobe -v error -select_streams a -show_entries stream=index -of csv=p=0 "{ts_segments[0]}"'
         audio_streams = os.popen(probe_cmd).read().strip().split('\n')
         num_audio_streams = len([s for s in audio_streams if s])  # Filter out empty lines
         
-        # Concatenate the clean segments with appropriate audio handling
+        # Concatenate the TS segments with appropriate audio handling
+        temp_output_file = os.path.join(temp_dir, f'highlights_temp_{int(time.time())}.mp4')
         output_file = os.path.join(export_dir, f'highlights_{int(time.time())}.mp4')
         
-        if num_audio_streams > 1:
-            # If we have multiple audio streams, merge them
-            concat_cmd = (
-                f'ffmpeg -f concat -safe 0 -i "{concat_list_path}" '
-                f'-filter_complex "[0:a:0][0:a:1]amerge=inputs=2,pan=stereo|c0<c0+c2|c1<c1+c3[aout]" '
-                f'-map 0:v:0 -map "[aout]" '
-                f'-c:v copy -c:a aac -b:a 192k '
-                f'-movflags +faststart "{output_file}"'
-            )
-        else:
-            # If we only have one audio stream, just copy it
-            concat_cmd = (
-                f'ffmpeg -f concat -safe 0 -i "{concat_list_path}" '
-                f'-c:v copy -c:a aac -b:a 192k '
-                f'-movflags +faststart "{output_file}"'
-            )
+        # Use concat demuxer with the concat_list.txt file and copy mode
+        concat_cmd = (
+            f'ffmpeg -f concat -safe 0 -i "{concat_list_path}" '
+            f'-c copy -fflags +genpts -movflags +faststart "{temp_output_file}"'
+        )
         
-        logging.info(f"Executing final concatenation with {'merged' if num_audio_streams > 1 else 'single'} audio track")
-        logging.debug(f"Concat command: {concat_cmd}")
+        logger.info("Executing concatenation with copy mode (no re-encoding)")
+        logger.debug(f"Concat command: {concat_cmd}")
         os.system(concat_cmd)
-        logging.info(f"Successfully created concatenated video: {output_file}")
+        
+        # Check if the concatenation was successful
+        if os.path.exists(temp_output_file) and os.path.getsize(temp_output_file) > 0:
+            # Just move the file to the final location - no additional processing needed
+            if os.path.exists(output_file):
+                os.remove(output_file)
+            shutil.copy(temp_output_file, output_file)
+            logger.info("Final video file created (all operations used copy mode, no re-encoding)")
+            
+            if os.path.exists(output_file) and os.path.getsize(output_file) > 0:
+                logger.info(f"Successfully created concatenated video: {output_file}")
+            else:
+                logger.error("Final copy operation failed to produce a valid output file")
+        else:
+            logger.error("Initial concatenation failed to produce a valid temporary file")
 
     except Exception as e:
-        logging.error(f"Error during video concatenation: {str(e)}")
+        logger.error(f"Error during video concatenation: {str(e)}")
         raise
     finally:
         # Clean up temporary directory and files
         if os.path.exists(temp_dir):
             shutil.rmtree(temp_dir)
-            logging.info("Cleaned up temporary files")
+            logger.info("Cleaned up temporary files")
 
 if __name__ == "__main__":
     concatenate_highlights() 

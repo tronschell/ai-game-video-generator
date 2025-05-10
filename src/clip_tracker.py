@@ -4,6 +4,7 @@ import logging
 from typing import List, Set
 from pathlib import Path
 
+# Get module-specific logger
 logger = logging.getLogger(__name__)
 
 class ClipTracker:

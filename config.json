@@ -7,5 +7,8 @@
   "username": "i have no enemies",
   "max_clips": 25,
   "allow_clip_reuse": true,
-  "temperature": 0.8
+  "temperature": 0.8,
+  "use_caching": false,
+  "cache_ttl_seconds": 3600,
+  "skip_videos": 60
 }

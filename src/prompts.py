@@ -1,7 +1,7 @@
 from string import Template
 
 CS2_HIGHLIGHT_PROMPT = Template('''
-    Analyze the provided Counter-Strike Global Offensive gameplay clip to identify highlight moments featuring player "${username}".
+    Analyze the provided Counter-Strike 2 gameplay clip to identify highlight moments featuring player "${username}".
 
     VARIABLES:
     - Player of Interest: "${username}"
