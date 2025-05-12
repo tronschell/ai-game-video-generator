@@ -35,7 +35,8 @@ class Config:
                 "temperature": 1.0,
                 "use_caching": False,
                 "cache_ttl_seconds": 3600,
-                "skip_videos": 0
+                "skip_videos": 0,
+                "use_low_resolution": False
             }
         except json.JSONDecodeError as e:
             logger.error(f"Error parsing config.json: {e}")
@@ -88,3 +89,7 @@ class Config:
     @property
     def skip_videos(self) -> int:
         return self._config.get("skip_videos", 0)
+
+    @property
+    def use_low_resolution(self) -> bool:
+        return self._config.get("use_low_resolution", False)

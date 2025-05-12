@@ -56,12 +56,14 @@ def process_recent_clips(directory_path: str, output_file: str = "highlights.jso
         # Convert Path objects to strings
         video_paths = [str(f) for f in video_files]
 
-        # Filter out previously used clips
-        clip_tracker = ClipTracker(allow_clip_reuse=False)  # Always set to False as per requirement
-        video_paths = clip_tracker.filter_unused_clips(video_paths)
-
-        # Get the configured number of clips after filtering
+        # Get config settings
         config = Config()
+        allow_reuse = config.allow_clip_reuse
+        logger.info(f"Clip reuse setting: allow_clip_reuse = {allow_reuse}")
+
+        # Filter out previously used clips based on configuration
+        clip_tracker = ClipTracker(allow_clip_reuse=allow_reuse)
+        video_paths = clip_tracker.filter_unused_clips(video_paths)
         
         # Apply skip_videos configuration
         if config.skip_videos > 0:

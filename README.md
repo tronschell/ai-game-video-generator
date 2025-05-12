@@ -2,7 +2,7 @@
 
 <div align="center">
 
-![Version](https://img.shields.io/badge/version-1.0-blue)
+![Version](https://img.shields.io/badge/version-1.0.1-blue)
 ![Python](https://img.shields.io/badge/python-3.8+-brightgreen)
 
 </div>
@@ -29,8 +29,8 @@
 ## 📋 Prerequisites
 
 - Python 3.8+
-- FFmpeg (installed and in PATH)
-- Google API key for Gemini AI
+- [FFmpeg](https://ffmpeg.org/download.html) (installed and in PATH)
+- [Google API](https://aistudio.google.com/app/apikey) key for Gemini AI
 - Gameplay recordings (optimized for CS2, works with other games)
 
 ## 🚀 Quick Start
@@ -146,7 +146,8 @@ The analysis prompts in `src/prompts.py` can be customized to define:
 - Videos should be encoded in h246 in MP4 format for Gemini AI compatibility
 - Default username for highlight detection is "{YOUR USERNAME HERE}"" (configurable)
 - Kill feed entries with thin red outlines are included in analysis for Counter Strike 2
-- Previously used clips are tracked to prevent duplicates
+- Previously used clips are tracked to prevent duplicates (configurable)
+
 
 ## 🤝 Contributing
 
@@ -155,5 +156,5 @@ Contributions are welcome! Feel free to submit issues, fork the repository, and 
 ---
 
 <div align="center">
-  Made with ❤️ for gamers who want to showcase their best moments
+  Made with ❤️ by Tron Schell
 </div>
