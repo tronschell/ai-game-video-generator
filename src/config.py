@@ -1,9 +1,12 @@
 import json
 import os
 import logging
-from typing import Dict, Any
+from typing import Dict, Any, Literal
 
 logger = logging.getLogger(__name__)
+
+# Define valid game types for typing
+GameType = Literal["cs2", "overwatch2", "the_finals", "league_of_legends", "custom"]
 
 class Config:
     _instance = None
@@ -36,7 +39,9 @@ class Config:
                 "use_caching": False,
                 "cache_ttl_seconds": 3600,
                 "skip_videos": 0,
-                "use_low_resolution": False
+                "use_low_resolution": False,
+                "clip_order": "oldest_first",
+                "game_type": "cs2"
             }
         except json.JSONDecodeError as e:
             logger.error(f"Error parsing config.json: {e}")
@@ -93,3 +98,17 @@ class Config:
     @property
     def use_low_resolution(self) -> bool:
         return self._config.get("use_low_resolution", False)
+    
+    @property
+    def clip_order(self) -> str:
+        return self._config.get("clip_order", "oldest_first")
+    
+    @property
+    def game_type(self) -> GameType:
+        """
+        Get the game type for prompt selection.
+        
+        Returns:
+            The game type as a string (cs2, overwatch2, the_finals, league_of_legends, custom)
+        """
+        return self._config.get("game_type", "cs2")

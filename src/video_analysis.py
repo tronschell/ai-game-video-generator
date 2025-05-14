@@ -12,7 +12,7 @@ from pathlib import Path
 from functools import partial
 from delete_files import FileDeleter
 from config import Config
-from prompts import CS2_HIGHLIGHT_PROMPT
+from prompts import get_prompt
 from token_counter import get_model_pricing, calculate_cost
 
 # Get module-specific logger
@@ -39,9 +39,11 @@ async def get_or_create_prompt_cache(client, config: Config) -> Optional[str]:
     
     # Create a new cache for the prompt
     try:
-        prompt = CS2_HIGHLIGHT_PROMPT.substitute(
-            min_highlight_duration_seconds=config.min_highlight_duration_seconds,
-            username=config.username
+        # Get the appropriate prompt based on game type
+        prompt = get_prompt(
+            config.game_type,
+            config.min_highlight_duration_seconds,
+            config.username
         )
         
         cache = client.caches.create(
@@ -60,7 +62,7 @@ async def get_or_create_prompt_cache(client, config: Config) -> Optional[str]:
         logger.error(f"Failed to create prompt cache: {str(e)}")
         return None
 
-async def analyze_videos_batch(video_paths: List[str], output_file: str = "highlights.json", batch_size: int = 10, prompt_template=CS2_HIGHLIGHT_PROMPT, token_cost_file: str = "token_costs.csv") -> List[Tuple[str, List[Dict[str, Any]]]]:
+async def analyze_videos_batch(video_paths: List[str], output_file: str = "highlights.json", batch_size: int = 10, prompt_template=None, token_cost_file: str = "token_costs.csv") -> List[Tuple[str, List[Dict[str, Any]]]]:
     """
     Analyze multiple videos in batches using Gemini.
 
@@ -103,7 +105,7 @@ async def analyze_videos_batch(video_paths: List[str], output_file: str = "highl
                     if isinstance(result, Exception):
                         logger.error(f"Failed to process {video_path}: {str(result)}")
                         results.append((video_path, []))
-                        token_usage.append({"video": video_path, "status": "failed", "prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "cost": 0.0})
+                        token_usage.append({"video": video_path, "status": "failed", "model_name": config.model_name, "prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "cost": 0.0})
                     else:
                         if isinstance(result, tuple) and len(result) == 2:
                             highlights, usage = result
@@ -112,7 +114,7 @@ async def analyze_videos_batch(video_paths: List[str], output_file: str = "highl
                         else:
                             results.append((video_path, result))
                             logger.warning(f"No token usage data for {video_path}")
-                            token_usage.append({"video": video_path, "status": "no_tokens", "prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "cost": 0.0})
+                            token_usage.append({"video": video_path, "status": "no_tokens", "model_name": config.model_name, "prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "cost": 0.0})
 
                 logger.info(f"✓ Completed batch {i//batch_size + 1}")
 
@@ -146,14 +148,18 @@ async def analyze_videos_batch(video_paths: List[str], output_file: str = "highl
             token_usage.append({
                 "video": "TOTAL",
                 "status": "summary",
+                "model_name": config.model_name,
                 "prompt_tokens": total_prompt_tokens,
                 "completion_tokens": total_completion_tokens,
                 "total_tokens": total_tokens,
                 "cost": total_cost
             })
             
+            # Define fieldnames including model_name to match the data structure
+            fieldnames = ["video", "status", "model_name", "prompt_tokens", "completion_tokens", "total_tokens", "cost"]
+            
             with open(token_cost_file, 'w', newline='') as f:
-                writer = csv.DictWriter(f, fieldnames=["video", "status", "prompt_tokens", "completion_tokens", "total_tokens", "cost"])
+                writer = csv.DictWriter(f, fieldnames=fieldnames)
                 writer.writeheader()
                 writer.writerows(token_usage)
             logger.info(f"✓ Token usage saved to {token_cost_file}")
@@ -164,7 +170,7 @@ async def analyze_videos_batch(video_paths: List[str], output_file: str = "highl
 
     return results
 
-async def analyze_video(video_path: str, output_file: str = "highlights.json", prompt_template=CS2_HIGHLIGHT_PROMPT) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+async def analyze_video(video_path: str, output_file: str = "highlights.json", prompt_template=None) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     """
     Analyze a video file using Gemini and append results to JSON file
 
@@ -174,6 +180,7 @@ async def analyze_video(video_path: str, output_file: str = "highlights.json", p
         prompt_template: Template string for the analysis prompt
     """
     config = Config()
+    model_name = config.model_name
 
     try:
         # Validate video file
@@ -184,7 +191,7 @@ async def analyze_video(video_path: str, output_file: str = "highlights.json", p
         if not video_path.lower().endswith('.mp4'):
             raise ValueError(f"File must be in MP4 format for best compatibility with Gemini")
 
-        logger.info(f"Analyzing video: {os.path.basename(video_path)}")
+        logger.info(f"Analyzing video: {os.path.basename(video_path)} with model: {model_name}")
 
         # Initialize Gemini client
         dotenv.load_dotenv()
@@ -248,10 +255,19 @@ async def analyze_video(video_path: str, output_file: str = "highlights.json", p
                         logger.debug("Using cached prompt")
                     else:
                         # Generate the prompt using the template
-                        prompt = prompt_template.substitute(
-                            min_highlight_duration_seconds=config.min_highlight_duration_seconds,
-                            username=config.username
-                        )
+                        if prompt_template is None:
+                            # Use dynamic prompt based on configured game type
+                            prompt = get_prompt(
+                                config.game_type,
+                                config.min_highlight_duration_seconds,
+                                config.username
+                            )
+                        else:
+                            # Use provided template (for backward compatibility)
+                            prompt = prompt_template.substitute(
+                                min_highlight_duration_seconds=config.min_highlight_duration_seconds,
+                                username=config.username
+                            )
                         
                         # Create content parts using the uploaded file and prompt
                         contents = [video_file, prompt]
@@ -322,11 +338,12 @@ async def analyze_video(video_path: str, output_file: str = "highlights.json", p
             if not isinstance(response_json, dict) or "highlights" not in response_json:
                 raise ValueError("Invalid response format from API")
 
-            # Process highlights (rest of the function remains unchanged)
+            # Process highlights with added model_name
             processed_highlights = []
             for highlight in response_json["highlights"]:
                 processed_highlight = {
                     "source_video": str(video_path),
+                    "model_name": model_name,
                     "timestamp_start_seconds": highlight["timestamp_start_seconds"],
                     "timestamp_end_seconds": highlight["timestamp_end_seconds"],
                     "clip_description": highlight["clip_description"]
@@ -340,13 +357,18 @@ async def analyze_video(video_path: str, output_file: str = "highlights.json", p
                 # Initialize file if it doesn't exist
                 if not os.path.exists(output_file):
                     with open(output_file, 'w') as f:
-                        json.dump({"highlights": []}, f)
+                        json.dump({"highlights": [], "model_name": model_name}, f)
 
                 # Read existing data
                 with open(output_file, 'r') as f:
                     existing_data = json.load(f)
+                
+                # Ensure the model_name is included in the root object
+                existing_data["model_name"] = model_name
 
                 # Append new highlights
+                if "highlights" not in existing_data:
+                    existing_data["highlights"] = []
                 existing_data["highlights"].extend(processed_highlights)
 
                 # Write updated data back to file
@@ -359,6 +381,7 @@ async def analyze_video(video_path: str, output_file: str = "highlights.json", p
             token_data = {
                 "video": video_path,
                 "status": "success",
+                "model_name": model_name,
                 "prompt_tokens": (prompt_tokens or 0) - (cached_tokens or 0),  # Only count non-cached tokens
                 "completion_tokens": completion_tokens or 0,
                 "total_tokens": (total_tokens or 0) - (cached_tokens or 0),  # Adjust total for cached tokens
@@ -385,7 +408,7 @@ async def analyze_video(video_path: str, output_file: str = "highlights.json", p
         token_data = {"video": video_path, "status": "error", "prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "cost": 0.0}
         raise
 
-def analyze_videos_sync(video_paths: List[str], output_file: str = "highlights.json", batch_size: int = None, prompt_template=CS2_HIGHLIGHT_PROMPT, token_cost_file: str = "token_costs.csv") -> List[Tuple[str, List[Dict[str, Any]]]]:
+def analyze_videos_sync(video_paths: List[str], output_file: str = "highlights.json", batch_size: int = None, prompt_template=None, token_cost_file: str = "token_costs.csv") -> List[Tuple[str, List[Dict[str, Any]]]]:
     """
     Synchronous wrapper for analyze_videos_batch
 

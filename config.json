@@ -5,11 +5,13 @@
   "retry_delay_seconds": 2,
   "min_highlight_duration_seconds": 17,
   "username": "i have no enemies",
-  "max_clips": 10,
-  "allow_clip_reuse": true,
-  "temperature": 0.8,
+  "max_clips": 27,
+  "allow_clip_reuse": false,
+  "temperature": 0.9,
   "use_caching": false,
   "cache_ttl_seconds": 3600,
   "skip_videos": 0,
-  "use_low_resolution": true
+  "use_low_resolution": true,
+  "clip_order": "newest_first",
+  "game_type": "cs2"
 }

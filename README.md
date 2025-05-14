@@ -91,7 +91,7 @@ The generator will:
 
 ## ⚙️ Configuration
 
-Edit `config.json` to customize behavior:
+Edit `config.json` to customize behavior. For detailed information on all configuration options, see the [Configuration Guide](docs/configuration.md).
 
 ```json
 {

@@ -39,5 +39,5 @@ output*.jpg
 highlights.json
 *.csv
 used_clips.json
-
+analyzed_clips.json
 

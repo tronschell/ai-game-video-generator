@@ -1,6 +1,6 @@
 from string import Template
 
-CS2_HIGHLIGHT_PROMPT = Template('''
+HIGHLIGHT_PROMPT = Template('''
     Analyze the provided Counter-Strike 2 gameplay clip to identify highlight moments featuring player "${username}".
 
     VARIABLES:
@@ -70,4 +70,4 @@ CS2_HIGHLIGHT_PROMPT = Template('''
         "clip_description": "${username} secures two quick AWP kills on B site. CHECK1. kill 1 (36 seconds, 4th round, "hillbilly"), kill 2 (45 seconds, 4th round, "the"), kill 3 on (82 seconds, 4th round, "tenz"), and kill 4 on (120 seconds, 5th round, optimus prime)."
       }
     ]
-    ''')
+    ''') 
