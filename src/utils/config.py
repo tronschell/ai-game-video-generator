@@ -19,7 +19,8 @@ class Config:
         return cls._instance
 
     def _load_config(self):
-        config_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'config.json')
+        # Adjust path to config.json, assuming it's in the parent directory of src
+        config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'config.json')
         try:
             with open(config_path, 'r') as f:
                 self._config = json.load(f)
@@ -41,7 +42,8 @@ class Config:
                 "skip_videos": 0,
                 "use_low_resolution": False,
                 "clip_order": "oldest_first",
-                "game_type": "cs2"
+                "game_type": "cs2",
+                "generate_subtitles": False
             }
         except json.JSONDecodeError as e:
             logger.error(f"Error parsing config.json: {e}")
@@ -101,6 +103,12 @@ class Config:
     
     @property
     def clip_order(self) -> str:
+        """
+        Get the order in which clips should be processed.
+        
+        Returns:
+            The clip order as a string ("oldest_first", "newest_first", "random")
+        """
         return self._config.get("clip_order", "oldest_first")
     
     @property
@@ -112,3 +120,13 @@ class Config:
             The game type as a string (cs2, overwatch2, the_finals, league_of_legends, custom)
         """
         return self._config.get("game_type", "cs2")
+
+    @property
+    def generate_subtitles(self) -> bool:
+        """
+        Get whether subtitles should be generated for the highlight video.
+        
+        Returns:
+            Boolean indicating whether to generate subtitles
+        """
+        return self._config.get("generate_subtitles", False) 

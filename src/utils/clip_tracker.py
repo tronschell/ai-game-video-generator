@@ -10,7 +10,9 @@ logger = logging.getLogger(__name__)
 class ClipTracker:
     def __init__(self, allow_clip_reuse: bool = False):
         self.allow_clip_reuse = allow_clip_reuse
-        self.used_clips_file = "used_clips.json"
+        # Define the path relative to the src directory, then join with exported_metadata
+        self.base_dir = Path(__file__).resolve().parent.parent # This should be src/
+        self.used_clips_file = self.base_dir / "exported_metadata" / "used_clips.json"
         self.used_clips: Set[str] = set()
         self._load_used_clips()
 
@@ -20,15 +22,16 @@ class ClipTracker:
             try:
                 with open(self.used_clips_file, 'r') as f:
                     self.used_clips = set(json.load(f))
-                logger.info(f"Loaded {len(self.used_clips)} previously used clips")
+                logger.info(f"Loaded {len(self.used_clips)} previously used clips from {self.used_clips_file}")
             except json.JSONDecodeError:
-                logger.error("Error reading used clips file, starting fresh")
+                logger.error(f"Error reading {self.used_clips_file}, starting fresh")
                 self.used_clips = set()
         else:
-            logger.info("No previous clips file found, starting fresh")
+            logger.info(f"{self.used_clips_file} not found, starting fresh")
 
     def save_used_clips(self) -> None:
         """Save the current list of used clips to JSON file."""
+        os.makedirs(self.used_clips_file.parent, exist_ok=True)
         with open(self.used_clips_file, 'w') as f:
             json.dump(list(self.used_clips), f, indent=4)
         logger.info(f"Saved {len(self.used_clips)} used clips to {self.used_clips_file}")

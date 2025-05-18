@@ -7,11 +7,11 @@
   "username": "i have no enemies",
   "max_clips": 27,
   "allow_clip_reuse": false,
-  "temperature": 0.9,
-  "use_caching": false,
+  "temperature": 1,
+  "use_caching": true,
   "cache_ttl_seconds": 3600,
   "skip_videos": 0,
-  "use_low_resolution": true,
+  "use_low_resolution": false,
   "clip_order": "newest_first",
-  "game_type": "cs2"
+  "game_type": "custom"
 }

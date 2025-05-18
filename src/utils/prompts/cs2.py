@@ -20,9 +20,10 @@ HIGHLIGHT_PROMPT = Template('''
     VIDEO PROCESSING INSTRUCTIONS:
     1. Analyze the entire video before identifying timestamps.
     2. Prioritize accuracy in identifying kills by "${username}" based on the kill feed.
-    3. For videos with a User/Character icons on the top middle of the screen, do not pay attention to the information around this section as it can be misleading.
-    4. (CRITICAL) When watching each video, keep a count of number of kills made by "${username}" and its associated timestamp, what round it occurred in (those are the 2 numbers in the top middle of the screen directly underneath the timer, for example 4 and 3 = round 8 since the current game is always + 1 or 12 and 11 meaning round 13) for your own thinking, and the name person that ${username} killed which can be found in the kill feed (top right corner).
-    5. (CRITICAL) Appended to the end of the clip_description, include the kill count timestamps for each kill, and the person killed from your memory based on the previous instruction. For example, "kill 1 (36 seconds, 4th round, "hillbilly"), kill 2 (45 seconds, 4th round, "the"), kill 3 on (82 seconds, 4th round, "tenz"), and kill 4 on (120 seconds, 5th round, optimus prime)."
+    3. Remember that you're processing a video at 1fps, so please always assume that something will happen every next frame that's considered a highlight.
+    4. For videos with a User/Character icons on the top middle of the screen, do not pay attention to the information around this section as it can be misleading.
+    5. (CRITICAL) When watching each video, keep a count of number of kills made by "${username}" and its associated timestamp, what round it occurred in (those are the 2 numbers in the top middle of the screen directly underneath the timer, for example 4 and 3 = round 8 since the current game is always + 1 or 12 and 11 meaning round 13) for your own thinking, and the name person that ${username} killed which can be found in the kill feed (top right corner).
+    6. (CRITICAL) Appended to the end of the clip_description, include the kill count timestamps for each kill, and the person killed from your memory based on the previous instruction. For example, "kill 1 (36 seconds, 4th round, "hillbilly"), kill 2 (45 seconds, 4th round, "the"), kill 3 on (82 seconds, 4th round, "tenz"), and kill 4 on (120 seconds, 5th round, optimus prime)."
 
     HIGHLIGHT IDENTIFICATION CRITERIA (Strictly Adhere):
 

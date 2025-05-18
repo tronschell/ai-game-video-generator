@@ -1,15 +1,18 @@
 import os
 import sys
+import random
+import json
+import subprocess
 from pathlib import Path
 from video_analysis import analyze_videos_sync
 from video_concatenator import concatenate_highlights
-from config import Config
-from clip_tracker import ClipTracker
-from analysis_tracker import AnalysisTracker
-from logging_config import setup_logging
+from utils.config import Config
+from utils.clip_tracker import ClipTracker
+from utils.analysis_tracker import AnalysisTracker
+from utils.logging_config import setup_logging
 import logging
-import json
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Tuple
+import argparse
 
 # Get module-specific logger
 logger = logging.getLogger(__name__)
@@ -17,7 +20,56 @@ logger = logging.getLogger(__name__)
 # Initialize logging at startup
 setup_logging()
 
-def delete_highlights_file(highlights_json_path: str = "highlights.json") -> None:
+def get_video_duration(video_path: str) -> float:
+    """
+    Get the duration of a video file in seconds using ffprobe.
+    
+    Args:
+        video_path: Path to the video file
+        
+    Returns:
+        Duration of the video in seconds or 0 if the video cannot be read
+    """
+    try:
+        # Run ffprobe command to get duration
+        result = subprocess.run([
+            'ffprobe',
+            '-v', 'error',
+            '-show_entries', 'format=duration',
+            '-of', 'json',
+            video_path
+        ], capture_output=True, text=True, check=True)
+        
+        # Parse the JSON output
+        output = json.loads(result.stdout)
+        duration = float(output['format']['duration'])
+        return duration
+    except (subprocess.SubprocessError, json.JSONDecodeError, KeyError, ValueError) as e:
+        logger.error(f"Error getting video duration for {video_path}: {str(e)}")
+        return 0
+
+def filter_videos_by_duration(video_paths: List[str], max_duration_seconds: int) -> List[str]:
+    """
+    Filter videos that are longer than the specified duration.
+    
+    Args:
+        video_paths: List of paths to video files
+        max_duration_seconds: Maximum duration in seconds
+        
+    Returns:
+        List of video paths that are under the specified duration
+    """
+    filtered_paths = []
+    for path in video_paths:
+        duration = get_video_duration(path)
+        if duration <= max_duration_seconds:
+            filtered_paths.append(path)
+        else:
+            logger.warning(f"Skipping video longer than {max_duration_seconds} seconds: {path} (duration: {duration:.1f}s)")
+    
+    return filtered_paths
+
+def delete_highlights_file(highlights_json_path: str = "exported_metadata/highlights.json") -> None:
     """
     Delete the highlights.json file.
 
@@ -27,7 +79,7 @@ def delete_highlights_file(highlights_json_path: str = "highlights.json") -> Non
     if os.path.exists(highlights_json_path):
         os.remove(highlights_json_path)
 
-def process_recent_clips(directory_path: str, output_file: str = "highlights.json", batch_size: int = 10) -> None:
+def process_recent_clips(directory_path: str, output_file: str = "exported_metadata/highlights.json", batch_size: int = 10) -> None:
     """
     Process video clips in the specified directory, sorted by creation date and filtered for unused clips.
 
@@ -53,16 +105,49 @@ def process_recent_clips(directory_path: str, output_file: str = "highlights.jso
             logger.warning(f"No video files found in {directory_path}")
             return
 
-        # Sort files by most recent timestamp (combining creation and modification times)
-        # This ensures we get the absolute newest files regardless of whether
-        # creation or modification time is more recent
-        video_files.sort(key=lambda x: max(x.stat().st_ctime, x.stat().st_mtime), reverse=True)
-
-        # Convert Path objects to strings
-        video_paths = [str(f) for f in video_files]
-
         # Get config settings
         config = Config()
+
+        # Sort files based on clip_order configuration
+        if config.clip_order == "random":
+            # Shuffle the video files randomly
+            random.shuffle(video_files)
+            logger.info(f"Videos shuffled randomly as per clip_order configuration")
+            
+            # Convert Path objects to strings
+            all_video_paths = [str(f) for f in video_files]
+            
+            # Process videos one by one until we have enough under 5 minutes
+            video_paths = []
+            for path in all_video_paths:
+                # First check if we have enough videos
+                if len(video_paths) >= config.max_clips:
+                    break
+                    
+                # Check duration only for videos we might use
+                duration = get_video_duration(path)
+                if duration <= 300:  # 5 minutes = 300 seconds
+                    video_paths.append(path)
+                    logger.debug(f"Added video under 5 minutes: {os.path.basename(path)} ({duration:.1f}s)")
+                else:
+                    logger.debug(f"Skipping video over 5 minutes: {os.path.basename(path)} ({duration:.1f}s)")
+            
+            if not video_paths:
+                logger.warning("No videos under 5 minutes found for random mode")
+                return
+                
+            logger.info(f"Selected {len(video_paths)} videos under 5 minutes for random mode")
+        else:
+            # Sort files by timestamp
+            reverse = config.clip_order != "oldest_first"  # Reverse if not oldest_first
+            video_files.sort(key=lambda x: max(x.stat().st_ctime, x.stat().st_mtime), reverse=reverse)
+            sort_direction = "newest first" if reverse else "oldest first"
+            logger.info(f"Videos sorted by timestamp ({sort_direction}) as per clip_order configuration")
+            
+            # Convert Path objects to strings
+            video_paths = [str(f) for f in video_files]
+
+        # Get clip reuse setting
         allow_reuse = config.allow_clip_reuse
         logger.info(f"Clip reuse setting: allow_clip_reuse = {allow_reuse}")
 
@@ -133,7 +218,7 @@ def process_recent_clips(directory_path: str, output_file: str = "highlights.jso
 
         # After analysis is complete, generate the final video
         if successful > 0:
-            generate_highlight_video(output_file)
+            generate_highlight_video(output_file, generate_subtitles=config.generate_subtitles)
             # Mark the successfully processed clips as used
             successful_clips = [path for path, highlights in results if highlights]
             clip_tracker.mark_clips_as_used(successful_clips)
@@ -142,9 +227,9 @@ def process_recent_clips(directory_path: str, output_file: str = "highlights.jso
         logger.error(f"Error processing clips: {str(e)}")
         raise
 
-def write_combined_highlights(results: List, output_file: str) -> None:
+def write_combined_highlights(results: List[Tuple[str, List[Dict[str, Any]]]], output_file: str = "exported_metadata/highlights.json") -> None:
     """
-    Write combined highlights (new and previously analyzed) to the output file.
+    Write combined highlights from all processed videos to a single JSON file.
     
     Args:
         results: List of tuples containing (video_path, highlights)
@@ -188,12 +273,13 @@ def write_combined_highlights(results: List, output_file: str) -> None:
         with open(output_file, 'w') as f:
             json.dump([], f)
 
-def generate_highlight_video(highlights_json_path: str = "highlights.json") -> None:
+def generate_highlight_video(highlights_json_path: str = "exported_metadata/highlights.json", generate_subtitles: bool = False) -> None:
     """
-    Generate the final highlight video after analysis is complete.
+    Generate a highlight video from a JSON file containing highlight information.
 
     Args:
         highlights_json_path: Path to the JSON file containing highlight information
+        generate_subtitles: Whether to generate subtitles for the highlights
     """
     try:
         if not os.path.exists(highlights_json_path):
@@ -201,7 +287,7 @@ def generate_highlight_video(highlights_json_path: str = "highlights.json") -> N
             return
 
         logger.info("Starting video concatenation process...")
-        concatenate_highlights(highlights_json_path)
+        concatenate_highlights(highlights_json_path, generate_subtitles=generate_subtitles)
         logger.info("Video concatenation completed successfully")
 
     except Exception as e:
@@ -211,8 +297,16 @@ def generate_highlight_video(highlights_json_path: str = "highlights.json") -> N
 if __name__ == "__main__":
     delete_highlights_file()
 
-    if len(sys.argv) != 2:
-        print("Usage: python main.py <directory_path>")
-        sys.exit(1)
+    parser = argparse.ArgumentParser(description="Process video clips to generate highlights")
+    parser.add_argument("directory_path", help="Path to the directory containing video clips")
+    parser.add_argument("--subtitles", action="store_true", help="Generate and add subtitles to the video")
     
-    process_recent_clips(sys.argv[1])
+    args = parser.parse_args()
+    
+    # Update config to use subtitle generation from command line
+    if args.subtitles:
+        config = Config()
+        config._config["generate_subtitles"] = True
+        logger.info("Subtitle generation enabled via command line flag")
+    
+    process_recent_clips(args.directory_path)

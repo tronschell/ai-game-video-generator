@@ -10,10 +10,11 @@ from google.genai import types
 from google.genai.types import GenerateContentConfig
 from pathlib import Path
 from functools import partial
-from delete_files import FileDeleter
-from config import Config
-from prompts import get_prompt
-from token_counter import get_model_pricing, calculate_cost
+from datetime import datetime
+from utils.delete_files import FileDeleter
+from utils.config import Config
+from utils.prompts import get_prompt
+from utils.token_counter import get_model_pricing, calculate_cost
 
 # Get module-specific logger
 logger = logging.getLogger(__name__)
@@ -62,7 +63,7 @@ async def get_or_create_prompt_cache(client, config: Config) -> Optional[str]:
         logger.error(f"Failed to create prompt cache: {str(e)}")
         return None
 
-async def analyze_videos_batch(video_paths: List[str], output_file: str = "highlights.json", batch_size: int = 10, prompt_template=None, token_cost_file: str = "token_costs.csv") -> List[Tuple[str, List[Dict[str, Any]]]]:
+async def analyze_videos_batch(video_paths: List[str], output_file: str = "exported_metadata/highlights.json", batch_size: int = 10, prompt_template=None, token_cost_file: str = "exported_metadata/token_costs.csv") -> List[Tuple[str, List[Dict[str, Any]]]]:
     """
     Analyze multiple videos in batches using Gemini.
 
@@ -170,7 +171,7 @@ async def analyze_videos_batch(video_paths: List[str], output_file: str = "highl
 
     return results
 
-async def analyze_video(video_path: str, output_file: str = "highlights.json", prompt_template=None) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+async def analyze_video(video_path: str, output_file: str = "exported_metadata/highlights.json", prompt_template=None) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     """
     Analyze a video file using Gemini and append results to JSON file
 
@@ -243,7 +244,6 @@ async def analyze_video(video_path: str, output_file: str = "highlights.json", p
                         response_mime_type="application/json",
                         response_schema=highlight_schema,
                         temperature=config.temperature
-                        #media_resolution=types.MediaResolution.MEDIA_RESOLUTION_LOW if config.use_low_resolution else types.MediaResolution.MEDIA_RESOLUTION_HIGH
                     )
                     
                     # Use cache if available
@@ -340,13 +340,17 @@ async def analyze_video(video_path: str, output_file: str = "highlights.json", p
 
             # Process highlights with added model_name
             processed_highlights = []
+            # Get current timestamp for all highlights from this analysis
+            analysis_timestamp = datetime.now().isoformat()
+            
             for highlight in response_json["highlights"]:
                 processed_highlight = {
                     "source_video": str(video_path),
                     "model_name": model_name,
                     "timestamp_start_seconds": highlight["timestamp_start_seconds"],
                     "timestamp_end_seconds": highlight["timestamp_end_seconds"],
-                    "clip_description": highlight["clip_description"]
+                    "clip_description": highlight["clip_description"],
+                    "analysis_datetime": analysis_timestamp
                 }
                 processed_highlights.append(processed_highlight)
 
@@ -408,7 +412,7 @@ async def analyze_video(video_path: str, output_file: str = "highlights.json", p
         token_data = {"video": video_path, "status": "error", "prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "cost": 0.0}
         raise
 
-def analyze_videos_sync(video_paths: List[str], output_file: str = "highlights.json", batch_size: int = None, prompt_template=None, token_cost_file: str = "token_costs.csv") -> List[Tuple[str, List[Dict[str, Any]]]]:
+def analyze_videos_sync(video_paths: List[str], output_file: str = "exported_metadata/highlights.json", batch_size: int = None, prompt_template=None, token_cost_file: str = "exported_metadata/token_costs.csv") -> List[Tuple[str, List[Dict[str, Any]]]]:
     """
     Synchronous wrapper for analyze_videos_batch
 

@@ -1,17 +1,19 @@
 import json
 import os
 import logging
-from typing import List, Set, Dict, Any
+from typing import List, Dict, Any # Removed Set as it's not used
 from pathlib import Path
 import hashlib
-from config import Config
+from .config import Config # Updated import for Config
 
 # Get module-specific logger
 logger = logging.getLogger(__name__)
 
 class AnalysisTracker:
     def __init__(self):
-        self.analyzed_clips_file = "analyzed_clips.json"
+        # Define the path relative to the src directory, then join with exported_metadata
+        self.base_dir = Path(__file__).resolve().parent.parent # This should be src/
+        self.analyzed_clips_file = self.base_dir / "exported_metadata" / "analyzed_clips.json"
         self.analyzed_data: Dict[str, Dict[str, Any]] = {}
         self._load_analyzed_clips()
 
@@ -21,15 +23,16 @@ class AnalysisTracker:
             try:
                 with open(self.analyzed_clips_file, 'r') as f:
                     self.analyzed_data = json.load(f)
-                logger.info(f"Loaded {len(self.analyzed_data)} previously analyzed clips")
+                logger.info(f"Loaded {len(self.analyzed_data)} previously analyzed clips from {self.analyzed_clips_file}")
             except json.JSONDecodeError:
-                logger.error("Error reading analyzed clips file, starting fresh")
+                logger.error(f"Error reading {self.analyzed_clips_file}, starting fresh")
                 self.analyzed_data = {}
         else:
-            logger.info("No previous analyzed clips file found, starting fresh")
+            logger.info(f"{self.analyzed_clips_file} not found, starting fresh")
 
     def save_analyzed_clips(self) -> None:
         """Save the current analyzed clips data to JSON file."""
+        os.makedirs(self.analyzed_clips_file.parent, exist_ok=True)
         with open(self.analyzed_clips_file, 'w') as f:
             json.dump(self.analyzed_data, f, indent=4)
         logger.info(f"Saved {len(self.analyzed_data)} analyzed clips to {self.analyzed_clips_file}")

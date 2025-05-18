@@ -7,8 +7,9 @@ from datetime import datetime
 def setup_logging():
     """Set up logging configuration for all modules"""
     try:
-        # Create logs directory if it doesn't exist
-        log_dir = Path('logs')
+        # Create logs directory relative to the project root (parent of src)
+        project_root = Path(__file__).resolve().parent.parent.parent
+        log_dir = project_root / 'logs'
         log_dir.mkdir(exist_ok=True)
         
         # Create dated log filename

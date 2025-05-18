@@ -54,4 +54,6 @@ def main():
     return 0
 
 if __name__ == "__main__":
+    # This main block is likely for standalone execution and might not be needed
+    # if this module is only used as a utility. Consider removing if not run directly.
     exit(main()) 

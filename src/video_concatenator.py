@@ -3,13 +3,31 @@ import os
 import logging
 import shutil
 import subprocess
+import tempfile
 from typing import List, Dict, Tuple, Optional
 import time
 from datetime import datetime
-from config import Config
+from pathlib import Path
+from utils.config import Config
+import concurrent.futures
+from functools import partial, lru_cache
+from subtitle_generator import SubtitleGenerator, generate_subtitles_for_video, cleanup_temp_files
 
 # Get module-specific logger
 logger = logging.getLogger(__name__)
+
+@lru_cache(maxsize=None)
+def is_nvenc_available() -> bool:
+    """Check if ffmpeg has h264_nvenc encoder."""
+    try:
+        result = subprocess.run(['ffmpeg', '-hide_banner', '-encoders'], capture_output=True, text=True, check=False)
+        return 'h264_nvenc' in result.stdout
+    except FileNotFoundError:
+        logger.error("ffmpeg not found. NVENC check cannot be performed.")
+        return False
+    except Exception as e:
+        logger.error(f"Error checking for NVENC availability: {e}")
+        return False
 
 def get_video_creation_time(video_path: str) -> datetime:
     """
@@ -153,38 +171,120 @@ def merge_overlapping_highlights(highlights: List[Dict]) -> List[Dict]:
 
     return merged_highlights
 
-def has_flac_or_alac_audio(video_path: str) -> bool:
+def process_segment(highlight: Dict, idx: int, total: int, temp_dir: str, generate_subtitles: bool = False) -> Tuple[str, bool, float, Optional[str]]:
     """
-    Check if a video file has FLAC or ALAC audio streams.
+    Process a single video segment in parallel by re-encoding.
     
     Args:
-        video_path: Path to the video file
-        
+        highlight: Highlight dict containing segment info
+        idx: Segment index
+        total: Total number of segments
+        temp_dir: Directory to save temporary files
+        generate_subtitles: Whether to generate subtitles for this segment
+    
     Returns:
-        True if FLAC or ALAC audio is detected, False otherwise
+        Tuple of (segment_file_path, success, duration, subtitle_path)
     """
-    try:
-        cmd = [
-            'ffprobe', '-v', 'error', 
-            '-select_streams', 'a:0',
-            '-show_entries', 'stream=codec_name',
-            '-of', 'default=noprint_wrappers=1:nokey=1',
-            '-i', video_path
-        ]
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        codec = result.stdout.strip().lower()
-        return 'flac' in codec or 'alac' in codec
-    except Exception as e:
-        logger.warning(f"Error checking audio codec: {str(e)}")
-        return False
+    source_video = highlight['source_video']
+    start_time = highlight['timestamp_start_seconds']
+    # Using the +2 second buffer as per user preference
+    end_time = highlight['timestamp_end_seconds'] + 2 
+    duration = end_time - start_time
+    
+    segment_file = os.path.join(temp_dir, f'segment_{idx:03d}.mp4')
 
-def concatenate_highlights(highlights_json_path: str = 'highlights.json') -> None:
+    logger.info(f"Processing segment {idx + 1}/{total} from {os.path.basename(source_video)} by re-encoding.")
+
+    video_filters = "setpts=PTS-STARTPTS,fps=60" # Corrected from fps=fps=30
+    audio_filters = "asetpts=PTS-STARTPTS"
+
+    ffmpeg_cmd_base = [
+        'ffmpeg', '-y', # Overwrite output files without asking
+        '-i', source_video,
+        '-ss', str(start_time),
+        '-t', str(duration),
+        '-vf', video_filters,
+        '-af', audio_filters,
+        '-c:a', 'aac', '-b:a', '192k', # Always encode audio to AAC
+        '-vsync', 'cfr', # Constant Frame Rate
+        '-avoid_negative_ts', 'make_zero', 
+        '-movflags', '+faststart',
+        '-map', '0:v:0', '-map', '0:a:0?'
+    ]
+
+    use_nvenc = is_nvenc_available()
+    if use_nvenc:
+        logger.info(f"Using h264_nvenc for segment {idx + 1}")
+        ffmpeg_cmd_video = ['-c:v', 'h264_nvenc', '-preset', 'p5', '-tune', 'hq', '-rc', 'vbr', '-cq', '23', '-b:v', '0']
+    else:
+        logger.info(f"Using libx264 for segment {idx + 1}")
+        ffmpeg_cmd_video = ['-c:v', 'libx264', '-crf', '22', '-preset', 'medium']
+
+    cut_cmd_list = ffmpeg_cmd_base + ffmpeg_cmd_video + [segment_file]
+    
+    logger.debug(f"Re-encode command for segment {idx + 1}: {' '.join(cut_cmd_list)}")
+    result = subprocess.run(cut_cmd_list, capture_output=True, text=True, check=False)
+    
+    if result.returncode != 0:
+        logger.warning(f"ffmpeg re-encode failed for segment {idx+1}. Return code: {result.returncode}")
+        logger.error(f"FFmpeg stderr: {result.stderr}")
+        logger.error(f"FFmpeg stdout: {result.stdout}")
+        # No retry logic here as per "as little code as possible" but can be added if necessary
+        # For now, if initial fails, we consider the segment failed.
+
+    # Verify segment duration
+    try:
+        duration_cmd = [
+            'ffprobe', '-v', 'error', 
+            '-show_entries', 'format=duration',
+            '-of', 'default=noprint_wrappers=1:nokey=1',
+            segment_file
+        ]
+        duration_result = subprocess.run(duration_cmd, capture_output=True, text=True, check=False)
+        actual_duration_str = duration_result.stdout.strip()
+        
+        if not actual_duration_str: # Handle empty output from ffprobe
+             raise ValueError("ffprobe returned empty duration.")
+        actual_duration = float(actual_duration_str)
+        
+        # Check if file exists and has valid size/duration
+        # We expect the duration to be close to the requested 'duration' variable
+        # Allowing a slightly larger tolerance due to re-encoding and filter effects.
+        if result.returncode == 0 and os.path.exists(segment_file) and os.path.getsize(segment_file) > 0 and abs(actual_duration - duration) < 1.0:
+            logger.info(f"Segment {idx+1} re-encoded successfully. Verified duration: {actual_duration:.2f}s (requested: {duration:.2f}s)")
+            
+            # Generate subtitles if requested
+            subtitle_path = None
+            if generate_subtitles and os.path.exists(segment_file):
+                try:
+                    logger.info(f"Generating subtitles for segment {idx+1}")
+                    subtitle_path = generate_subtitles_for_video(segment_file, is_short=False)
+                    logger.info(f"Subtitles generated for segment {idx+1}: {subtitle_path}")
+                except Exception as e:
+                    logger.error(f"Failed to generate subtitles for segment {idx+1}: {str(e)}")
+            
+            return segment_file, True, actual_duration, subtitle_path
+        else:
+            if result.returncode == 0: # ffmpeg succeeded but validation failed
+                 logger.warning(f"Segment {idx+1} validation failed post re-encode. Actual duration {actual_duration:.2f}s vs requested {duration:.2f}s.")
+            logger.warning(f"Segment {idx+1} failed processing or validation.")
+            return segment_file, False, 0, None
+            
+    except Exception as e:
+        logger.warning(f"Could not verify segment {idx+1} duration or segment failed: {str(e)}")
+        if result.stderr: # Log ffmpeg error if verification failed
+            logger.error(f"FFmpeg stderr (during failed verification): {result.stderr}")
+        return segment_file, False, 0, None
+
+def concatenate_highlights(highlights_json_path: str = 'highlights.json', num_workers: int = 4, generate_subtitles: bool = False) -> None:
     """
     Concatenates video clips specified in highlights.json into a single output video
     using a two-step process to ensure clean concatenation.
     
     Args:
         highlights_json_path: Path to the JSON file containing highlights
+        num_workers: Number of worker processes for parallel processing
+        generate_subtitles: Whether to generate subtitles for the segments
     """
     # Create necessary directories
     export_dir = 'exported_videos'
@@ -192,7 +292,9 @@ def concatenate_highlights(highlights_json_path: str = 'highlights.json') -> Non
     os.makedirs(export_dir, exist_ok=True)
     os.makedirs(temp_dir, exist_ok=True)
 
-    cut_segments = []
+    # Track temporary files for cleanup
+    temp_files_to_clean = []
+
     try:
         # Read the highlights.json file
         with open(highlights_json_path, 'r') as f:
@@ -250,127 +352,143 @@ def concatenate_highlights(highlights_json_path: str = 'highlights.json') -> Non
             logger.warning(f"Unknown clip_order value: {clip_order}, defaulting to oldest_first")
             highlights.sort(key=lambda x: parse_video_timestamp(x['source_video']))
         
-        # Step 1: Cut each segment precisely with timestamps and standardize audio to AAC
-        for idx, highlight in enumerate(highlights):
-            source_video = highlight['source_video']
-            start_time = highlight['timestamp_start_seconds']
-            # Add 1 second to end time for smooth transitions
-            end_time = highlight['timestamp_end_seconds'] + 2
-            duration = end_time - start_time
-            
-            segment_file = os.path.join(temp_dir, f'segment_{idx:03d}.mp4')  # Zero-pad for correct ordering
-            
-            # Check if source has FLAC/ALAC audio that needs conversion
-            needs_audio_conversion = has_flac_or_alac_audio(source_video)
-            
-            # Standardize the audio to AAC to ensure compatibility
-            logger.info(f"Cutting segment {idx + 1}/{len(highlights)} from {os.path.basename(source_video)}")
-            
-            if needs_audio_conversion:
-                # Re-encode video when exotic audio formats are detected using NVIDIA hardware acceleration
-                logger.info(f"FLAC/ALAC audio detected, re-encoding segment {idx + 1} with GPU acceleration")
-                cut_cmd = (
-                    f'ffmpeg -i "{source_video}" -ss {start_time} '
-                    f'-t {duration} -c:v h264_nvenc -preset p4 -tune hq -b:v 30M -c:a aac -b:a 192k '
-                    f'-avoid_negative_ts make_zero -movflags +faststart '
-                    f'-map 0:v:0 -map 0:a:0? "{segment_file}"'
-                )
-            else:
-                # Use accurate two-pass cutting for standard audio formats
-                logger.info(f"Using accurate two-pass cutting for segment {idx + 1}")
-                cut_cmd = (
-                    f'ffmpeg -i "{source_video}" -ss {start_time} '
-                    f'-t {duration} -c:v h264_nvenc -preset p4 -tune hq -b:v 30M -c:a aac -b:a 192k '
-                    f'-avoid_negative_ts make_zero -movflags +faststart '
-                    f'-map 0:v:0 -map 0:a:0? "{segment_file}"'
-                )
-            
-            logger.debug(f"Cut command: {cut_cmd}")
-            os.system(cut_cmd)
-            
-            # Verify segment duration to ensure accurate cutting
-            try:
-                duration_cmd = [
-                    'ffprobe', '-v', 'error', 
-                    '-show_entries', 'format=duration',
-                    '-of', 'default=noprint_wrappers=1:nokey=1',
-                    segment_file
-                ]
-                result = subprocess.run(duration_cmd, capture_output=True, text=True)
-                actual_duration = float(result.stdout.strip())
-                expected_duration = duration
-                
-                # Check if the cut segment is within reasonable bounds
-                if abs(actual_duration - expected_duration) > 3:
-                    logger.warning(f"Segment {idx+1} duration mismatch: expected {expected_duration:.2f}s, got {actual_duration:.2f}s")
-                    # Re-cut using stricter method for problem segments
-                    retry_cmd = (
-                        f'ffmpeg -i "{source_video}" -ss {start_time} -to {start_time + duration} '
-                        f'-c:v h264_nvenc -preset p4 -tune hq -b:v 30M -c:a aac -b:a 192k '
-                        f'-avoid_negative_ts make_zero -movflags +faststart '
-                        f'-map 0:v:0 -map 0:a:0? -y "{segment_file}"'
-                    )
-                    logger.info(f"Retrying segment {idx+1} with precise cutting")
-                    os.system(retry_cmd)
-                else:
-                    logger.info(f"Segment {idx+1} duration verified: {actual_duration:.2f}s")
-            except Exception as e:
-                logger.warning(f"Could not verify segment {idx+1} duration: {str(e)}")
-            
-            cut_segments.append(segment_file)
-
-        # Step 2: Verify all segments before concatenation
+        # Step 1: Process segments concurrently using a worker pool
         verified_segments = []
+        segment_subtitles = {}
         total_duration = 0
+        total_highlights = len(highlights)
         
-        for idx, segment in enumerate(cut_segments):
-            # Verify each segment's duration using ffprobe
-            try:
-                duration_cmd = [
-                    'ffprobe', '-v', 'error', 
-                    '-show_entries', 'format=duration',
-                    '-of', 'default=noprint_wrappers=1:nokey=1',
-                    segment
-                ]
-                result = subprocess.run(duration_cmd, capture_output=True, text=True)
-                duration = float(result.stdout.strip())
-                logger.info(f"Segment {idx+1} duration: {duration:.2f} seconds")
-                
-                if duration > 0 and os.path.exists(segment) and os.path.getsize(segment) > 0:
-                    verified_segments.append(segment)
-                    total_duration += duration
-                else:
-                    logger.warning(f"Skipping invalid segment {idx+1} (duration: {duration:.2f}s)")
-            except Exception as e:
-                logger.warning(f"Error verifying segment {idx+1}: {str(e)}")
+        logger.info(f"Processing {total_highlights} segments using {num_workers} workers")
         
-        logger.info(f"Total verified segments: {len(verified_segments)}/{len(cut_segments)}")
+        # Create a partial function with fixed parameters
+        process_fn = partial(process_segment, total=total_highlights, temp_dir=temp_dir, generate_subtitles=generate_subtitles)
+        
+        with concurrent.futures.ProcessPoolExecutor(max_workers=num_workers) as executor:
+            # Submit all segment processing tasks
+            futures = {executor.submit(process_fn, highlight, idx): idx 
+                      for idx, highlight in enumerate(highlights)}
+            
+            # Process results as they complete
+            for future in concurrent.futures.as_completed(futures):
+                idx = futures[future]
+                try:
+                    segment_file, success, duration, subtitle_path = future.result()
+                    if success:
+                        verified_segments.append(segment_file)
+                        total_duration += duration
+                        if subtitle_path:
+                            segment_subtitles[segment_file] = subtitle_path
+                        logger.info(f"Segment {idx+1}/{total_highlights} completed successfully")
+                    else:
+                        logger.warning(f"Segment {idx+1}/{total_highlights} processing failed")
+                except Exception as e:
+                    logger.error(f"Error processing segment {idx+1}: {str(e)}")
+        
+        logger.info(f"Total verified segments: {len(verified_segments)}/{total_highlights}")
         logger.info(f"Expected total duration: {total_duration:.2f} seconds")
         
         # Create a fresh concatenation file list with only verified segments
         concat_list_path = os.path.join(temp_dir, 'concat_list.txt')
         with open(concat_list_path, 'w') as f:
-            for segment in verified_segments:
-                f.write(f"file '{os.path.abspath(segment)}'\n")
+            for segment_file_path in verified_segments:
+                f.write(f"file '{os.path.abspath(segment_file_path)}'\n")
 
         # Step 3: Use concat demuxer for stream copying (no re-encoding)
         output_file = os.path.join(export_dir, f'highlights_{int(time.time())}.mp4')
         
+        # Process each segment with subtitles before concatenation if needed
+        if generate_subtitles and segment_subtitles:
+            logger.info("Preparing segments with subtitles")
+            
+            # Create temporary directory for subtitled segments
+            subtitled_temp_dir = os.path.join(temp_dir, 'subtitled')
+            os.makedirs(subtitled_temp_dir, exist_ok=True)
+            
+            subtitled_segments = []
+            subtitle_generator = SubtitleGenerator()
+            
+            for idx, segment_file in enumerate(verified_segments):
+                subtitled_file = os.path.join(subtitled_temp_dir, f'subtitled_segment_{idx:03d}.mp4')
+                
+                if segment_file in segment_subtitles:
+                    srt_path = segment_subtitles[segment_file]
+                    
+                    # Create an intermediate file without subtitles
+                    intermediate_file = os.path.join(subtitled_temp_dir, f'intermediate_segment_{idx:03d}.mp4')
+                    
+                    # Copy the segment first
+                    try:
+                        shutil.copy(segment_file, intermediate_file)
+                        
+                        # Convert to absolute POSIX path for consistency
+                        posix_path = Path(srt_path).resolve().as_posix()
+                        # Escape the colon for Windows drive letters for FFmpeg filter syntax
+                        ffmpeg_filter_path = posix_path.replace(':', '\\:')
+                        
+                        # Construct the video filter string for subtitles with styling
+                        # Note: No extra single quotes around ffmpeg_filter_path for filename value
+                        vf_filter = f"subtitles=filename={ffmpeg_filter_path}:force_style='FontName=Arial,FontSize=24,PrimaryColour=&HFFFFFF,BackColour=&H00000000,OutlineColour=&H80000000,BorderStyle=1,Outline=1,Shadow=1'"
+                        
+                        # Now add subtitles as a separate step
+                        ffmpeg_cmd = [
+                            'ffmpeg', '-y',
+                            '-i', intermediate_file,
+                            '-vf', vf_filter,
+                            '-c:v', 'libx264' if not is_nvenc_available() else 'h264_nvenc',
+                            '-preset', 'medium' if not is_nvenc_available() else 'p5',
+                            '-crf', '22' if not is_nvenc_available() else '28',
+                            '-c:a', 'copy',
+                            subtitled_file
+                        ]
+                        
+                        logger.info(f"Adding subtitles to segment {idx+1}")
+                        subprocess.run(ffmpeg_cmd, check=True, capture_output=True)
+                        subtitled_segments.append(subtitled_file)
+                        
+                        # Clean up intermediate file
+                        if os.path.exists(intermediate_file):
+                            os.unlink(intermediate_file)
+                    except subprocess.CalledProcessError as e:
+                        logger.error(f"Error adding subtitles to segment {idx+1}: {e.stderr.decode() if e.stderr else str(e)}")
+                        # Fall back to original segment if subtitle addition fails
+                        subtitled_segments.append(segment_file)
+                    except Exception as e:
+                        logger.error(f"Unexpected error processing segment {idx+1}: {str(e)}")
+                        subtitled_segments.append(segment_file)
+                else:
+                    # No subtitles for this segment, use the original
+                    subtitled_segments.append(segment_file)
+            
+            # Update the concat list with subtitled segments
+            with open(concat_list_path, 'w') as f:
+                for segment_file_path in subtitled_segments:
+                    f.write(f"file '{os.path.abspath(segment_file_path)}'\n")
+        
         # Use the simple concat demuxer which allows for stream copying
-        concat_cmd = (
-            f'ffmpeg -f concat -safe 0 -i "{concat_list_path}" '
-            f'-c copy -movflags +faststart "{output_file}"'
-        )
+        concat_cmd_list = [
+            'ffmpeg', '-f', 'concat', '-safe', '0', '-i', concat_list_path,
+            '-c', 'copy', '-movflags', '+faststart', output_file
+        ]
         
         logger.info(f"Executing concatenation with concat demuxer (verified segments: {len(verified_segments)})")
-        logger.debug(f"Concat command: {concat_cmd}")
-        os.system(concat_cmd)
+        logger.debug(f"Concat command: {concat_cmd_list}")
+        concat_result = subprocess.run(concat_cmd_list, capture_output=True, text=True)
                     
         # Check if the concatenation was successful
-        if os.path.exists(output_file) and os.path.getsize(output_file) > 0:
+        if concat_result.returncode == 0 and os.path.exists(output_file) and os.path.getsize(output_file) > 0:
             logger.info(f"Successfully created concatenated video: {output_file}")
+            if concat_result.stdout:
+                logger.debug(f"FFmpeg stdout (concat): {concat_result.stdout}")
+            if concat_result.stderr: # Log stderr even on success for info messages like moov atom
+                logger.debug(f"FFmpeg stderr (concat): {concat_result.stderr}")
         else:
-            logger.error("Concatenation method failed")
+            logger.error(f"Concatenation method failed. Return code: {concat_result.returncode}")
+            logger.error(f"FFmpeg stderr (concat): {concat_result.stderr}")
+            logger.error(f"FFmpeg stdout (concat): {concat_result.stdout}")
+            if not os.path.exists(output_file):
+                logger.error(f"Output file {output_file} does not exist.")
+            elif os.path.getsize(output_file) == 0:
+                logger.error(f"Output file {output_file} is empty.")
 
     except Exception as e:
         logger.error(f"Error during video concatenation: {str(e)}")
@@ -380,6 +498,32 @@ def concatenate_highlights(highlights_json_path: str = 'highlights.json') -> Non
         if os.path.exists(temp_dir):
             shutil.rmtree(temp_dir)
             logger.info("Cleaned up temporary files")
+        
+        # Clean up any temporary filter script files that weren't in the temp_dir
+        for temp_file in temp_files_to_clean:
+            try:
+                if os.path.exists(temp_file):
+                    os.unlink(temp_file)
+                    logger.debug(f"Cleaned up temporary filter script: {temp_file}")
+            except Exception as e:
+                logger.warning(f"Error cleaning up temporary file: {e}")
 
 if __name__ == "__main__":
-    concatenate_highlights() 
+    import argparse
+    
+    parser = argparse.ArgumentParser(description="Concatenate video highlights into a single video")
+    parser.add_argument("--highlights", default="highlights.json", help="Path to the highlights JSON file")
+    parser.add_argument("--workers", type=int, default=4, help="Number of worker processes for parallel processing")
+    parser.add_argument("--subtitles", action="store_true", help="Generate and add subtitles to the video")
+    
+    args = parser.parse_args()
+    
+    try:
+        concatenate_highlights(
+            highlights_json_path=args.highlights,
+            num_workers=args.workers,
+            generate_subtitles=args.subtitles
+        )
+    finally:
+        # Clean up any temporary files created by the subtitle generator
+        cleanup_temp_files() 
